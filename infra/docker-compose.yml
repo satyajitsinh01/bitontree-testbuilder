@@ -1,0 +1,79 @@
+# Full production-like stack. Local development also works with zero
+# dependencies (SQLite + stubs) — see README.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: testbuilder
+      POSTGRES_PASSWORD: testbuilder
+      POSTGRES_DB: testbuilder
+    ports: ["5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U testbuilder"]
+      interval: 5s
+      retries: 10
+
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    environment:
+      DB_HOST: postgres
+      DB_USER: testbuilder
+      DB_PASSWORD: testbuilder
+      POOL_MODE: transaction
+      AUTH_TYPE: scram-sha-256
+    ports: ["6432:5432"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports: ["9000:9000", "9001:9001"]
+    volumes: [minio:/data]
+
+  judge0:
+    image: judge0/judge0:1.13.1
+    ports: ["2358:2358"]
+    environment:
+      REDIS_HOST: judge0-redis
+      POSTGRES_HOST: judge0-db
+      POSTGRES_USER: judge0
+      POSTGRES_PASSWORD: judge0
+      POSTGRES_DB: judge0
+    privileged: true
+    depends_on: [judge0-db, judge0-redis]
+
+  judge0-workers:
+    image: judge0/judge0:1.13.1
+    command: ["./scripts/workers"]
+    environment:
+      REDIS_HOST: judge0-redis
+      POSTGRES_HOST: judge0-db
+      POSTGRES_USER: judge0
+      POSTGRES_PASSWORD: judge0
+      POSTGRES_DB: judge0
+    privileged: true
+    depends_on: [judge0-db, judge0-redis]
+
+  judge0-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: judge0
+      POSTGRES_PASSWORD: judge0
+      POSTGRES_DB: judge0
+
+  judge0-redis:
+    image: redis:7-alpine
+
+volumes:
+  pgdata:
+  minio:
