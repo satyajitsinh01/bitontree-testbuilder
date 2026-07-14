@@ -126,7 +126,7 @@ export default function ExamPage() {
       <main className="min-h-screen flex items-center justify-center bg-muted/40 p-6">
         <Card className="max-w-md w-full text-center">
           <CardHeader>
-            <CheckCircle2 className="h-12 w-12 text-green-600 mx-auto" />
+            <CheckCircle2 className="h-12 w-12 text-foreground mx-auto" />
             <CardTitle>Assessment submitted</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">

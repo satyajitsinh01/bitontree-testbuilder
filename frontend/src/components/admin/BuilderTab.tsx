@@ -249,7 +249,7 @@ export function BuilderTab({
   return (
     <div className="space-y-4">
       {frozen && (
-        <p className="rounded-md border border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-900">
+        <p className="rounded-lg border bg-muted/60 px-4 py-2.5 text-sm text-muted-foreground">
           This version is frozen because candidates have started it. Editing the
           assessment details creates a new version automatically; section edits require
           that fork first.

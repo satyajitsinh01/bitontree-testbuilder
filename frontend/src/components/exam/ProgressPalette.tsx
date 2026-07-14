@@ -6,8 +6,8 @@ import { cn } from "@/lib/utils";
 const STATE_STYLES: Record<ExamQuestion["state"], string> = {
   unseen: "bg-muted text-muted-foreground",
   seen: "bg-background border",
-  answered: "bg-green-600 text-white",
-  marked_review: "bg-amber-500 text-white",
+  answered: "bg-primary text-primary-foreground",
+  marked_review: "bg-muted-foreground/80 text-background ring-1 ring-inset ring-foreground/30",
 };
 
 /** Question palette with attempted / unattempted / marked counts (FR-054). */

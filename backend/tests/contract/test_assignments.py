@@ -113,10 +113,10 @@ def _csv_bytes() -> bytes:
     end = (now() + timedelta(hours=5)).strftime("%Y-%m-%d %H:%M")
     rows = [
         "name,email,phone,start_at,end_at",
-        f"Alice A,alice@x.com,+911111111111,{start},{end}",
-        f"Bob B,not-an-email,+912222222222,{start},{end}",  # invalid email
-        f"Cara C,cara@x.com,+913333333333,{start},{end}",
-        f"Dupe D,alice@x.com,+914444444444,{start},{end}",  # duplicate in file
+        f"Alice A,alice@x.com,+919111111111,{start},{end}",
+        f"Bob B,not-an-email,+919222222222,{start},{end}",  # invalid email
+        f"Cara C,cara@x.com,+919333333333,{start},{end}",
+        f"Dupe D,alice@x.com,+919444444444,{start},{end}",  # duplicate in file
     ]
     return "\n".join(rows).encode()
 

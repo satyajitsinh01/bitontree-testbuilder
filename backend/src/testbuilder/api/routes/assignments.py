@@ -2,7 +2,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import PlainTextResponse
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, field_validator
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,6 +25,15 @@ from ..deps import AdminContext, require_roles
 router = APIRouter(tags=["assignments"])
 
 
+def _validate_phone(value: str) -> str:
+    from ...services.importer import INDIAN_MOBILE_RE, normalize_phone
+
+    cleaned = normalize_phone(value.strip())
+    if cleaned and not INDIAN_MOBILE_RE.match(cleaned):
+        raise ValueError("phone must be a 10-digit Indian mobile (starts 6-9, +91 optional)")
+    return cleaned
+
+
 class AssignmentIn(BaseModel):
     full_name: str
     email: EmailStr
@@ -33,6 +42,11 @@ class AssignmentIn(BaseModel):
     window_end_at: datetime
     send_email: bool = True
 
+    @field_validator("phone")
+    @classmethod
+    def phone_valid(cls, v: str) -> str:
+        return _validate_phone(v)
+
 
 class AssignmentPatch(BaseModel):
     full_name: str | None = None
@@ -40,6 +54,11 @@ class AssignmentPatch(BaseModel):
     window_start_at: datetime | None = None
     window_end_at: datetime | None = None
     send_email: bool | None = None
+
+    @field_validator("phone")
+    @classmethod
+    def phone_valid(cls, v: str | None) -> str | None:
+        return None if v is None else _validate_phone(v)
 
 
 def _naive(dt: datetime) -> datetime:

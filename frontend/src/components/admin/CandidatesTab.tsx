@@ -34,7 +34,12 @@ function toLocalInputValue(offsetMinutes: number): string {
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const PHONE_RE = /^[+\d][\d\s\-()]{6,19}$/;
+// Indian mobile: exactly 10 digits starting 6-9, optional +91 prefix
+const INDIAN_MOBILE_RE = /^(?:\+91)?[6-9]\d{9}$/;
+
+function normalizePhone(raw: string): string {
+  return raw.replace(/[\s()-]/g, "");
+}
 
 type CandidateForm = {
   fullName: string;
@@ -49,8 +54,8 @@ function validateCandidate(form: CandidateForm): Partial<Record<keyof CandidateF
   if (form.fullName.trim().length < 2) errors.fullName = "Enter the candidate's full name.";
   if (!form.email.trim()) errors.email = "Email is required.";
   else if (!EMAIL_RE.test(form.email.trim())) errors.email = "Enter a valid email address.";
-  if (form.phone.trim() && !PHONE_RE.test(form.phone.trim()))
-    errors.phone = "Enter a valid phone number (digits, spaces, + - ( ) allowed).";
+  if (form.phone.trim() && !INDIAN_MOBILE_RE.test(normalizePhone(form.phone)))
+    errors.phone = "Enter a valid 10-digit Indian mobile number (starts with 6-9, +91 optional).";
   if (!form.startAt) errors.startAt = "Start time is required.";
   if (!form.endAt) errors.endAt = "End time is required.";
   if (form.startAt && form.endAt) {
@@ -106,7 +111,7 @@ function AddCandidateDialog({
         body: {
           full_name: form.fullName.trim(),
           email: form.email.trim(),
-          phone: form.phone.trim(),
+          phone: normalizePhone(form.phone),
           window_start_at: new Date(form.startAt).toISOString(),
           window_end_at: new Date(form.endAt).toISOString(),
           send_email: sendEmail,
@@ -186,8 +191,15 @@ function AddCandidateDialog({
               </div>
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="cand-phone">Phone (optional)</Label>
-              <Input id="cand-phone" placeholder="+91 12345 67890" {...field("phone")} />
+              <Label htmlFor="cand-phone">Mobile number (optional)</Label>
+              <Input
+                id="cand-phone"
+                type="tel"
+                inputMode="tel"
+                maxLength={16}
+                placeholder="+91 98765 43210"
+                {...field("phone")}
+              />
               {touched.phone && <FieldError message={errors.phone} />}
             </div>
             <div className="grid grid-cols-2 gap-4">
@@ -349,7 +361,7 @@ export function CandidatesTab({
   return (
     <div className="space-y-4">
       {!published && (
-        <p className="rounded-md border border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-900">
+        <p className="rounded-lg border bg-muted/60 px-4 py-2.5 text-sm text-muted-foreground">
           Publish the assessment before candidates can start their exam.
         </p>
       )}

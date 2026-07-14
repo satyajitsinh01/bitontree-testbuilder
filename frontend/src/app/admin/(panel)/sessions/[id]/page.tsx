@@ -312,7 +312,7 @@ export default function SessionReportPage({
                 </p>
               )}
               {item.evaluation?.override_reason && (
-                <p className="text-xs text-amber-700">
+                <p className="text-xs font-medium text-muted-foreground">
                   Overridden: {item.evaluation.override_reason}
                 </p>
               )}

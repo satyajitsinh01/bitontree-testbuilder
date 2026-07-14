@@ -9,8 +9,13 @@ from datetime import datetime
 from openpyxl import load_workbook
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
-PHONE_RE = re.compile(r"^[+\d][\d\s\-()]{6,19}$")
+# Indian mobile: exactly 10 digits starting 6-9, optional +91 prefix
+INDIAN_MOBILE_RE = re.compile(r"^(?:\+91)?[6-9]\d{9}$")
 COLUMNS = ["name", "email", "phone", "start_at", "end_at"]
+
+
+def normalize_phone(raw: str) -> str:
+    return re.sub(r"[\s()\-]", "", raw)
 
 
 def parse_rows(filename: str, content: bytes) -> list[dict]:
@@ -56,13 +61,13 @@ def validate_row(row: dict, now: datetime) -> tuple[dict | None, str | None]:
     """Returns (clean_row, error). clean_row has name, email, phone, start_at, end_at."""
     name = row.get("name", "").strip()
     email = row.get("email", "").strip().lower()
-    phone = row.get("phone", "").strip()
+    phone = normalize_phone(row.get("phone", "").strip())
     if not name:
         return None, "name is required"
     if not EMAIL_RE.match(email):
         return None, f"invalid email: {email or '(empty)'}"
-    if phone and not PHONE_RE.match(phone):
-        return None, f"invalid phone: {phone}"
+    if phone and not INDIAN_MOBILE_RE.match(phone):
+        return None, f"invalid phone (expected 10-digit Indian mobile): {phone}"
     start_at = _parse_dt(row.get("start_at", ""))
     end_at = _parse_dt(row.get("end_at", ""))
     if start_at is None or end_at is None:
@@ -79,5 +84,5 @@ def validate_row(row: dict, now: datetime) -> tuple[dict | None, str | None]:
 
 CSV_TEMPLATE = (
     "name,email,phone,start_at,end_at\n"
-    "Jane Doe,jane@example.com,+911234567890,2026-08-01 10:00,2026-08-01 14:00\n"
+    "Jane Doe,jane@example.com,+919876543210,2026-08-01 10:00,2026-08-01 14:00\n"
 )

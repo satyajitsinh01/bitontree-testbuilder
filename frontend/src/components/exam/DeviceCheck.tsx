@@ -86,7 +86,7 @@ export function DeviceCheck({
   function icon(value: boolean | null) {
     if (value === null) return <Circle className="h-4 w-4 text-muted-foreground animate-pulse" />;
     return value ? (
-      <CheckCircle2 className="h-4 w-4 text-green-600" />
+      <CheckCircle2 className="h-4 w-4 text-foreground" />
     ) : (
       <XCircle className="h-4 w-4 text-destructive" />
     );

@@ -241,7 +241,7 @@ async def add_candidate(
         json={
             "full_name": "Jane Doe",
             "email": email,
-            "phone": "+911234567890",
+            "phone": "+919876543210",
             "window_start_at": (now() + start_delta).isoformat(),
             "window_end_at": (now() + end_delta).isoformat(),
             "send_email": True,
