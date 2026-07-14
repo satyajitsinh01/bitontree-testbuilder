@@ -10,6 +10,7 @@ from ...security import create_access_token, verify_password
 from ...services.tokens import issue_refresh, revoke_family, rotate_refresh
 
 router = APIRouter(prefix="/auth/admin", tags=["auth"])
+unified_router = APIRouter(prefix="/auth", tags=["auth"])
 
 REFRESH_COOKIE = "tb_refresh"
 
@@ -57,6 +58,43 @@ async def admin_login(body: LoginIn, response: Response, db: AsyncSession = Depe
         },
         "error": None,
     }
+
+
+@unified_router.post("/login")
+async def unified_login(
+    body: LoginIn, response: Response, db: AsyncSession = Depends(get_db)
+):
+    """Single sign-in for everyone (email + password). Admin accounts win when the
+    email matches one; otherwise the per-assignment candidate password is checked."""
+    email = body.email.lower()
+    user = (
+        await db.execute(select(User).where(User.email == email))
+    ).scalar_one_or_none()
+    if user is not None and user.is_active and verify_password(body.password, user.password_hash):
+        user.last_login_at = now_utc()
+        roles = await _roles_for(db, user.id)
+        access = create_access_token("user", user.id, org_id=user.org_id, roles=roles)
+        refresh = await issue_refresh(db, subject_type="user", subject_id=user.id)
+        await db.commit()
+        _set_refresh_cookie(response, refresh)
+        return {
+            "data": {
+                "kind": "admin",
+                "access_token": access,
+                "refresh_token": refresh,
+                "user": {"id": user.id, "email": user.email, "full_name": user.full_name},
+                "roles": roles,
+            },
+            "error": None,
+        }
+
+    from .candidate_auth import build_candidate_login_response, find_assignment_by_email
+
+    assignment = await find_assignment_by_email(db, email, body.password)
+    if assignment is None:
+        raise HTTPException(401, "invalid_credentials")
+    data = await build_candidate_login_response(db, assignment, response)
+    return {"data": {"kind": "candidate", **data}, "error": None}
 
 
 class RefreshIn(BaseModel):

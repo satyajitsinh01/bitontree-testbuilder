@@ -1,5 +1,7 @@
+import json
+
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,7 +20,12 @@ from ...models.base import now_utc
 from ...models.questions import DIFFICULTIES, QTYPES
 from ...services import ai as ai_service
 from ...services.audit import write_audit
-from ...services.quality import find_duplicates, structural_errors
+from ...services.quality import (
+    DUPLICATE_THRESHOLD,
+    find_duplicates,
+    similarity,
+    structural_errors,
+)
 from ..deps import AdminContext, require_roles
 
 log = structlog.get_logger()
@@ -201,6 +208,185 @@ async def create_question(
     out = _question_out(question, version)
     out["quality_flags"] = flags
     return {"data": out, "error": None}
+
+
+# Canonical JSON import format ("perfect format"): a top-level {"questions": [...]}
+# array. Per item: qtype + title + config are required; everything else defaults.
+IMPORT_TEMPLATE = {
+    "questions": [
+        {
+            "qtype": "mcq",
+            "title": "Which HTTP method is idempotent?",
+            "body": "Choose the best answer.",
+            "difficulty": "easy",
+            "category": "Web",
+            "topic": "http",
+            "skills": ["backend"],
+            "tags": ["http", "rest"],
+            "expected_duration_sec": 60,
+            "answer_type": "single_choice",
+            "config": {
+                "options": [
+                    {"id": "a", "text": "PUT"},
+                    {"id": "b", "text": "POST"},
+                    {"id": "c", "text": "PATCH"},
+                ],
+                "correct_option_ids": ["a"],
+            },
+        },
+        {
+            "qtype": "mcq",
+            "title": "Select ALL valid HTTP success codes",
+            "difficulty": "medium",
+            "answer_type": "multi_choice",
+            "config": {
+                "options": [
+                    {"id": "a", "text": "200"},
+                    {"id": "b", "text": "201"},
+                    {"id": "c", "text": "404"},
+                    {"id": "d", "text": "204"},
+                    {"id": "e", "text": "500"},
+                ],
+                "correct_option_ids": ["a", "b", "d"],
+            },
+        },
+        {
+            "qtype": "text",
+            "title": "Explain database indexing",
+            "difficulty": "medium",
+            "answer_type": "long_text",
+            "config": {
+                "rubric": "Mentions B-tree structure, read speedup, write cost",
+                "expected_answer": "Indexes are auxiliary structures that speed up lookups...",
+            },
+        },
+        {
+            "qtype": "coding",
+            "title": "Two Sum",
+            "body": "Return indices of the two numbers that add up to target.",
+            "difficulty": "hard",
+            "answer_type": "code",
+            "config": {
+                "allowed_languages": ["python", "javascript"],
+                "starter_code": {
+                    "python": "def two_sum(nums, target):\n    # write your logic here\n    pass\n",
+                    "javascript": "function twoSum(nums, target) {\n"
+                    "  // write your logic here\n}\n",
+                },
+                "test_cases": [
+                    {"id": "t1", "input": "2 7 11 15\n9", "expected_output": "0 1",
+                     "is_hidden": False, "weight": 1},
+                    {"id": "t2", "input": "3 2 4\n6", "expected_output": "1 2",
+                     "is_hidden": True, "weight": 2},
+                ],
+                "show_case_results": "visible_only",
+            },
+        },
+    ]
+}
+
+DEFAULT_ANSWER_TYPE = {"mcq": "single_choice", "text": "long_text", "coding": "code"}
+
+
+@router.get("/import-template")
+async def import_template(
+    ctx: AdminContext = Depends(require_roles("test_creator")),
+):
+    return {"data": IMPORT_TEMPLATE, "error": None}
+
+
+@router.post("/import", status_code=202)
+async def import_questions(
+    file: UploadFile = File(...),
+    ctx: AdminContext = Depends(require_roles("test_creator")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Bulk import from a .json file. Every valid item lands as a draft
+    (source=import) that must be approved before use, mirroring the AI flow."""
+    content = await file.read()
+    if len(content) > 2 * 1024 * 1024:
+        raise HTTPException(422, "file_too_large")
+    try:
+        data = json.loads(content)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(
+            422, {"code": "invalid_json", "details": [str(exc)]}
+        ) from None
+    items = data.get("questions") if isinstance(data, dict) else None
+    if not isinstance(items, list) or not items:
+        raise HTTPException(
+            422,
+            {"code": "invalid_format",
+             "details": ['expected {"questions": [...]} — download the template']},
+        )
+    created_ids: list[str] = []
+    errors: list[dict] = []
+    for index, item in enumerate(items):
+        if not isinstance(item, dict):
+            errors.append({"index": index, "error": "item must be an object"})
+            continue
+        qtype = item.get("qtype")
+        title = str(item.get("title") or "").strip()
+        config = item.get("config") or {}
+        difficulty = item.get("difficulty", "medium")
+        problems: list[str] = []
+        if qtype not in QTYPES:
+            problems.append(f"qtype must be one of {QTYPES}")
+        if len(title) < 3:
+            problems.append("title is required (min 3 chars)")
+        if difficulty not in DIFFICULTIES:
+            problems.append(f"difficulty must be one of {DIFFICULTIES}")
+        if qtype in QTYPES:
+            problems.extend(structural_errors(qtype, config))
+        if problems:
+            errors.append({"index": index, "title": title, "error": "; ".join(problems)})
+            continue
+        question = Question(
+            org_id=ctx.org_id, status="draft", source="import", created_by=ctx.user.id
+        )
+        db.add(question)
+        await db.flush()
+        version = QuestionVersion(
+            question_id=question.id,
+            version=1,
+            qtype=qtype,
+            answer_type=item.get("answer_type", DEFAULT_ANSWER_TYPE[qtype]),
+            category=str(item.get("category", "general")),
+            difficulty=difficulty,
+            title=title[:300],
+            body=str(item.get("body", "")),
+            config=config,
+            topic=str(item.get("topic", "")),
+            skills=item.get("skills") or [],
+            expected_duration_sec=int(item.get("expected_duration_sec", 120)),
+            tags=item.get("tags") or [],
+        )
+        db.add(version)
+        await db.flush()
+        question.current_version_id = version.id
+        created_ids.append(question.id)
+    await write_audit(
+        db,
+        org_id=ctx.org_id,
+        actor_type="user",
+        actor_id=ctx.user.id,
+        action="question.bulk_imported",
+        entity_type="question_bank",
+        entity_id=ctx.org_id,
+        after={"imported": len(created_ids), "failed": len(errors)},
+        request_id=ctx.request_id,
+        ip=ctx.ip,
+    )
+    await db.commit()
+    return {
+        "data": {
+            "imported": len(created_ids),
+            "failed": len(errors),
+            "errors": errors,
+            "question_ids": created_ids,
+        },
+        "error": None,
+    }
 
 
 @router.get("/{question_id}")
@@ -389,6 +575,20 @@ class AIGenerateIn(BaseModel):
     topic: str = "general"
     skills: list[str] = []
 
+    @field_validator("difficulty")
+    @classmethod
+    def difficulty_valid(cls, v: str) -> str:
+        if v not in DIFFICULTIES:
+            raise ValueError(f"difficulty must be one of {DIFFICULTIES}")
+        return v
+
+    @field_validator("qtype")
+    @classmethod
+    def qtype_valid(cls, v: str) -> str:
+        if v not in QTYPES:
+            raise ValueError(f"qtype must be one of {QTYPES}")
+        return v
+
 
 @router.post("/ai-generate", status_code=202)
 async def ai_generate(
@@ -404,13 +604,44 @@ async def ai_generate(
     )
     db.add(generation)
     await db.commit()
+    # existing bank titles feed the prompt so the model avoids repeats
+    existing_titles = [
+        version.title
+        for version in (
+            await db.execute(
+                select(QuestionVersion)
+                .join(Question, Question.current_version_id == QuestionVersion.id)
+                .where(
+                    Question.org_id == ctx.org_id,
+                    Question.status.in_(("active", "draft")),
+                    Question.deleted_at.is_(None),
+                )
+                .order_by(QuestionVersion.created_at.desc())
+                .limit(60)
+            )
+        ).scalars()
+    ]
     # inline job execution (research R16 dispatcher; ARQ worker in production)
+    skipped_duplicates = 0
     try:
         questions, model = ai_service.generate_questions(
-            body.prompt, body.qtype, body.count, body.difficulty, body.topic, body.skills
+            body.prompt, body.qtype, body.count, body.difficulty, body.topic, body.skills,
+            avoid_titles=existing_titles,
         )
         created_ids = []
+        batch_titles: list[str] = []
         for item in questions:
+            item_title = str(item.get("title", ""))
+            # title-based dedupe: near-identical titles mean a repeated question,
+            # while distinct questions on one topic still differ in their titles
+            is_duplicate = any(
+                similarity(item_title, seen) >= DUPLICATE_THRESHOLD
+                for seen in (*existing_titles, *batch_titles)
+            )
+            if is_duplicate:
+                skipped_duplicates += 1
+                continue
+            batch_titles.append(item_title)
             question = Question(
                 org_id=ctx.org_id,
                 status="draft",  # FR-043: AI output is never immediately publishable
@@ -450,6 +681,7 @@ async def ai_generate(
             "generation_id": generation.id,
             "status": generation.status,
             "question_ids": created_ids,
+            "skipped_duplicates": skipped_duplicates,
         },
         "error": None,
     }

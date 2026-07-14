@@ -41,11 +41,18 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(RequestValidationError)
     async def validation_exc(request: Request, exc: RequestValidationError):
+        from fastapi.encoders import jsonable_encoder
+
         return JSONResponse(
             status_code=422,
             content={
                 "data": None,
-                "error": {"code": "validation_error", "details": exc.errors()},
+                "error": {
+                    "code": "validation_error",
+                    "details": jsonable_encoder(
+                        exc.errors(), custom_encoder={ValueError: str}
+                    ),
+                },
             },
         )
 
@@ -70,6 +77,7 @@ def create_app() -> FastAPI:
 
     prefix = "/api/v1"
     app.include_router(auth.router, prefix=prefix)
+    app.include_router(auth.unified_router, prefix=prefix)
     app.include_router(admin_users.router, prefix=prefix)
     app.include_router(audit.router, prefix=prefix)
     app.include_router(questions.router, prefix=prefix)

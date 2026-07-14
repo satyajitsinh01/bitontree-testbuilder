@@ -40,8 +40,13 @@ def _gemini_json(prompt: str) -> dict:
 
 
 def _stub_questions(qtype: str, count: int, difficulty: str, topic: str) -> list[dict]:
+    import uuid
+
     questions = []
     for i in range(count):
+        # unique marker per question so stub output survives similarity dedupe,
+        # like genuinely distinct model output would
+        marker = uuid.uuid4().hex[:10]
         if qtype == "mcq":
             config = {
                 "options": [{"id": f"o{j}", "text": f"Option {j + 1}"} for j in range(4)],
@@ -65,9 +70,9 @@ def _stub_questions(qtype: str, count: int, difficulty: str, topic: str) -> list
             answer_type = "long_text"
         questions.append(
             {
-                "title": f"[draft] {topic} question {i + 1}",
-                "body": f"Stub {qtype} question about {topic} (set TB_GEMINI_API_KEY for "
-                "real generation).",
+                "title": f"[draft {marker}] {topic} {difficulty} question {i + 1}",
+                "body": f"Stub {qtype} about {topic}, variant {marker} "
+                "(set TB_GEMINI_API_KEY for real generation).",
                 "qtype": qtype,
                 "answer_type": answer_type,
                 "difficulty": difficulty,
@@ -80,16 +85,30 @@ def _stub_questions(qtype: str, count: int, difficulty: str, topic: str) -> list
 
 
 def generate_questions(
-    prompt: str, qtype: str, count: int, difficulty: str, topic: str, skills: list[str]
+    prompt: str,
+    qtype: str,
+    count: int,
+    difficulty: str,
+    topic: str,
+    skills: list[str],
+    avoid_titles: list[str] | None = None,
 ) -> tuple[list[dict], str]:
-    """Returns (questions, model_used). Raises ValueError on unusable AI output."""
+    """Returns (questions, model_used). Raises ValueError on unusable AI output.
+    avoid_titles feeds existing bank questions into the prompt so the model does
+    not regenerate them; the caller additionally dedupes by similarity."""
     settings = get_settings()
     if not settings.gemini_api_key:
         return _stub_questions(qtype, count, difficulty, topic), "stub"
+    avoid_clause = ""
+    if avoid_titles:
+        joined = "; ".join(avoid_titles[:40])
+        avoid_clause = (
+            f"\nIMPORTANT: do NOT repeat or rephrase these existing questions: {joined}"
+        )
     full_prompt = (
-        f"Generate {count} {difficulty} {qtype} assessment questions on '{topic}' "
-        f"(skills: {', '.join(skills) or topic}). Admin instructions: {prompt}\n"
-        + GENERATION_SCHEMA_HINT
+        f"Generate {count} {difficulty}-difficulty {qtype} assessment questions on "
+        f"'{topic}' (skills: {', '.join(skills) or topic}). Admin instructions: {prompt}"
+        f"{avoid_clause}\n" + GENERATION_SCHEMA_HINT
     )
     data = _gemini_json(full_prompt)
     questions = data.get("questions")

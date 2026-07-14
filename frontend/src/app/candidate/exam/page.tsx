@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -64,7 +64,7 @@ export default function ExamPage() {
 
   useEffect(() => {
     if (!getToken("candidate")) {
-      router.replace("/candidate/login");
+      router.replace("/login");
       return;
     }
     (async () => {
@@ -138,7 +138,7 @@ export default function ExamPage() {
               variant="outline"
               onClick={() => {
                 setToken("candidate", null);
-                router.push("/candidate/login");
+                router.push("/login");
               }}
             >
               Sign out
@@ -158,7 +158,7 @@ export default function ExamPage() {
           </CardHeader>
           <CardContent className="space-y-4">
             <p className="text-sm text-muted-foreground">{endedReason}</p>
-            <Button variant="outline" onClick={() => router.push("/candidate/login")}>
+            <Button variant="outline" onClick={() => router.push("/login")}>
               Back to sign in
             </Button>
           </CardContent>
@@ -372,7 +372,7 @@ function ExamShell({
               {activeSection?.is_final ? (
                 <Button onClick={() => setConfirmOpen(true)}>Submit and End Test</Button>
               ) : (
-                <Button onClick={submitSection}>Submit section →</Button>
+                <Button onClick={submitSection}>Submit section â†’</Button>
               )}
             </div>
           </CardContent>

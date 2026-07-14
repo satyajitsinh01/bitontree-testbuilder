@@ -27,7 +27,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
   const [name, setName] = useState("");
 
   useEffect(() => {
-    if (!getToken("admin")) router.replace("/admin/login");
+    if (!getToken("admin")) router.replace("/login");
     setName(window.localStorage.getItem("tb_admin_name") ?? "");
   }, [router]);
 
@@ -79,7 +79,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
             className="w-full justify-start gap-2 text-sidebar-foreground/70"
             onClick={() => {
               setToken("admin", null);
-              router.push("/admin/login");
+              router.push("/login");
             }}
           >
             <LogOut className="h-4 w-4" /> Sign out

@@ -67,6 +67,66 @@ object storage, real AI, and real email — everything else falls back safely.
 Schema changes go through Alembic: `uv run alembic revision --autogenerate -m "..."`
 then `uv run alembic upgrade head`.
 
+## Email setup (Resend)
+
+Without a key, emails print to the backend console (dev mode). To send real email:
+
+1. Create a free account at [resend.com](https://resend.com) → **API Keys** → create a key.
+2. **Domains** → add your domain and create the DNS records Resend shows you
+   (SPF + DKIM, usually 3 records). Wait for "Verified" — this is what makes
+   delivery reliable and keeps you out of spam.
+3. In `backend/.env` set:
+   ```
+   TB_RESEND_API_KEY=re_xxxxxxxxxxxx
+   TB_EMAIL_FROM=TestBuilder <invites@yourdomain.com>   # must be on the verified domain
+   TB_FRONTEND_BASE_URL=https://your-app-url            # used for the sign-in link
+   ```
+4. Restart the backend. Invitations, resends and credentials all include the
+   sign-in link, the candidate's email and their one-time password. Delivery
+   status is tracked per candidate under the assignment's email history.
+
+If you have no domain yet, Resend lets you send from `onboarding@resend.dev`
+to your own inbox only — enough for testing.
+
+## Question JSON import format
+
+Admins can bulk-import questions (Question Bank → *Import JSON*). Everything
+imports as **drafts** that must be approved. Download the exact template from
+the UI (or `GET /api/v1/questions/import-template`). Shape:
+
+```json
+{
+  "questions": [
+    {
+      "qtype": "mcq | text | coding",        // required
+      "title": "Question title",              // required, min 3 chars
+      "body": "Longer prompt (optional)",
+      "difficulty": "easy | medium | hard",   // default medium
+      "category": "Web", "topic": "http",
+      "skills": ["backend"], "tags": ["rest"],
+      "expected_duration_sec": 60,
+      "answer_type": "single_choice | multi_choice | long_text | code",
+      "config": {
+        // mcq (any number of options, one or many correct):
+        "options": [{"id": "a", "text": "..."}],
+        "correct_option_ids": ["a"],
+        // text:
+        "rubric": "...", "expected_answer": "...",
+        // coding (boilerplate the candidate completes + test cases):
+        "allowed_languages": ["python", "javascript"],
+        "starter_code": {"python": "def solve():\n    pass"},
+        "test_cases": [
+          {"id": "t1", "input": "...", "expected_output": "...",
+           "is_hidden": false, "weight": 1}
+        ]
+      }
+    }
+  ]
+}
+```
+
+Invalid entries are reported per index with the reason; valid ones import anyway.
+
 ## Tests
 
 ```bash

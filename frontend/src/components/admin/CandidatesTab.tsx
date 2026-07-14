@@ -164,9 +164,13 @@ function AddCandidateDialog({
               {credentials.send_email ? " was sent." : " was NOT sent (toggle off)."}
             </p>
             <div className="rounded-md bg-muted p-4 font-mono text-sm space-y-1">
-              <p>Username: {credentials.username}</p>
+              <p>Sign-in email: {credentials.candidate.email}</p>
               <p>Password: {credentials.initial_password}</p>
             </div>
+            <p className="text-xs text-muted-foreground">
+              The candidate signs in on the same login page as admins, using their
+              email and this password.
+            </p>
             <Button className="w-full" onClick={() => setOpen(false)}>
               Done
             </Button>

@@ -20,30 +20,76 @@ class CandidateLoginIn(BaseModel):
     password: str
 
 
-@router.post("/login")
-async def candidate_login(
-    body: CandidateLoginIn, response: Response, db: AsyncSession = Depends(get_db)
-):
-    assignment = (
-        await db.execute(
-            select(TestAssignment).where(TestAssignment.username == body.username.strip())
+async def find_assignment_by_email(
+    db: AsyncSession, email: str, password: str
+) -> TestAssignment | None:
+    """Email + password login: the per-assignment password disambiguates when the
+    same email is invited to several assessments (FR-014)."""
+    candidates = (
+        (
+            await db.execute(
+                select(Candidate).where(Candidate.email == email.strip().lower())
+            )
         )
-    ).scalar_one_or_none()
-    if (
-        assignment is None
-        or assignment.status == "removed"
-        or assignment.credentials_expired
-        or not verify_password(body.password, assignment.password_hash)
-    ):
+        .scalars()
+        .all()
+    )
+    if not candidates:
+        return None
+    assignments = (
+        (
+            await db.execute(
+                select(TestAssignment).where(
+                    TestAssignment.candidate_id.in_([c.id for c in candidates]),
+                    TestAssignment.status != "removed",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    matches = [a for a in assignments if verify_password(password, a.password_hash)]
+    if not matches:
+        return None
+    now = now_utc()
+    # prefer an open window, then the next upcoming one, then most recent
+    open_now = [a for a in matches if a.window_start_at <= now < a.window_end_at]
+    if open_now:
+        return open_now[0]
+    upcoming = sorted(
+        (a for a in matches if a.window_start_at > now), key=lambda a: a.window_start_at
+    )
+    if upcoming:
+        return upcoming[0]
+    return sorted(matches, key=lambda a: a.window_end_at)[-1]
+
+
+async def build_candidate_login_response(
+    db: AsyncSession, assignment: TestAssignment, response: Response
+) -> dict:
+    """Shared gating + token issuance for both login shapes. Raises HTTPException
+    with candidate-facing codes/messages when access must be denied."""
+    if assignment.credentials_expired:
         raise HTTPException(401, "invalid_credentials")
+    if assignment.status == "completed":
+        # submitted assessments permanently invalidate the credentials
+        assignment.credentials_expired = True
+        await db.commit()
+        raise HTTPException(
+            403,
+            {
+                "code": "already_submitted",
+                "message": "You have already submitted this assessment. "
+                "Your credentials are no longer valid.",
+            },
+        )
     if assignment.window_end_at < now_utc():
         assignment.credentials_expired = True  # FR-017 lazy expiry
         await db.commit()
         raise HTTPException(
             403, {"code": "window_expired", "message": "Assessment window has expired."}
         )
-    state = window_state(assignment)
-    if state == "not_started":
+    if window_state(assignment) == "not_started":
         raise HTTPException(
             403,
             {
@@ -88,22 +134,40 @@ async def candidate_login(
         path="/api/v1/auth",
     )
     return {
-        "data": {
-            "access_token": access,
-            "refresh_token": refresh,
-            "assignment_summary": {
-                "assignment_id": assignment.id,
-                "candidate_name": candidate.full_name,
-                "assessment_title": assessment.title,
-                "window_start_at": assignment.window_start_at.isoformat(),
-                "window_end_at": assignment.window_end_at.isoformat(),
-                "server_now": now_utc().isoformat(),
-                "has_active_session": active is not None,
-                "status": assignment.status,
-            },
+        "access_token": access,
+        "refresh_token": refresh,
+        "assignment_summary": {
+            "assignment_id": assignment.id,
+            "candidate_name": candidate.full_name,
+            "assessment_title": assessment.title,
+            "window_start_at": assignment.window_start_at.isoformat(),
+            "window_end_at": assignment.window_end_at.isoformat(),
+            "server_now": now_utc().isoformat(),
+            "has_active_session": active is not None,
+            "status": assignment.status,
         },
-        "error": None,
     }
+
+
+@router.post("/login")
+async def candidate_login(
+    body: CandidateLoginIn, response: Response, db: AsyncSession = Depends(get_db)
+):
+    """Legacy username-based login; the unified /auth/login (email + password) is
+    what the UI uses."""
+    assignment = (
+        await db.execute(
+            select(TestAssignment).where(TestAssignment.username == body.username.strip())
+        )
+    ).scalar_one_or_none()
+    if (
+        assignment is None
+        or assignment.status == "removed"
+        or not verify_password(body.password, assignment.password_hash)
+    ):
+        raise HTTPException(401, "invalid_credentials")
+    data = await build_candidate_login_response(db, assignment, response)
+    return {"data": data, "error": None}
 
 
 class RefreshIn(BaseModel):

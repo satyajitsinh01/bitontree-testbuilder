@@ -45,14 +45,19 @@ def similarity(a: str, b: str) -> float:
 
 
 async def find_duplicates(
-    db: AsyncSession, org_id: str, title: str, body: str, exclude_question_id: str | None = None
+    db: AsyncSession,
+    org_id: str,
+    title: str,
+    body: str,
+    exclude_question_id: str | None = None,
+    statuses: tuple[str, ...] = ("active",),
 ) -> list[dict]:
-    """Near-duplicate detection against the active bank. Uses difflib similarity,
+    """Near-duplicate detection against the bank. Uses difflib similarity,
     which is portable; Postgres deployments may switch to pg_trgm (research R15)."""
     q = (
         select(QuestionVersion, Question)
         .join(Question, Question.current_version_id == QuestionVersion.id)
-        .where(Question.org_id == org_id, Question.status == "active")
+        .where(Question.org_id == org_id, Question.status.in_(statuses))
     )
     if exclude_question_id:
         q = q.where(Question.id != exclude_question_id)

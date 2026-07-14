@@ -23,8 +23,8 @@ def _invitation_payload(
     return {
         "assessment_title": title,
         "candidate_name": candidate.full_name,
-        "login_url": f"{settings.frontend_base_url}/candidate/login",
-        "username": assignment.username,
+        "login_url": f"{settings.frontend_base_url}/login",
+        "login_email": candidate.email,
         "password": password,  # None on resends (credentials already delivered)
         "window_start_ist": start_ist.isoformat() + " (IST is server time reference)",
         "window_end_ist": end_ist.isoformat(),
@@ -44,12 +44,16 @@ def _invitation_payload(
 
 def _render_text(kind: str, payload: dict) -> str:
     lines = [
-        f"Assessment: {payload.get('assessment_title', '')}",
-        f"Login: {payload.get('login_url', '')}",
-        f"Username: {payload.get('username', '')}",
+        f"Hello {payload.get('candidate_name', '')},",
+        "",
+        f"You are invited to the assessment: {payload.get('assessment_title', '')}",
+        f"Sign in at: {payload.get('login_url', '')}",
+        f"Email: {payload.get('login_email', '')}",
     ]
     if payload.get("password"):
         lines.append(f"Password: {payload['password']}")
+    else:
+        lines.append("Password: use the password from your most recent invitation email")
     lines += [
         f"Window (IST): {payload.get('window_start_ist')} -> {payload.get('window_end_ist')}",
         "",
