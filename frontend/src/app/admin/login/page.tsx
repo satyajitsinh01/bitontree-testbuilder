@@ -40,10 +40,10 @@ export default function AdminLogin() {
   }
 
   return (
-    <main className="min-h-screen flex items-center justify-center bg-muted/40 p-6">
-      <Card className="w-full max-w-sm">
+    <main className="min-h-screen flex items-center justify-center bg-gradient-to-br from-muted/60 via-background to-accent/40 p-6">
+      <Card className="w-full max-w-sm shadow-xl shadow-foreground/5">
         <CardHeader>
-          <CardTitle>Admin sign in</CardTitle>
+          <CardTitle className="text-xl">Admin sign in</CardTitle>
           <CardDescription>TestBuilder assessment platform</CardDescription>
         </CardHeader>
         <CardContent>

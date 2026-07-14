@@ -32,12 +32,20 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
   }, [router]);
 
   return (
-    <div className="min-h-screen flex bg-muted/30">
-      <aside className="w-60 shrink-0 border-r bg-background flex flex-col">
-        <div className="h-14 flex items-center px-5 border-b font-semibold tracking-tight">
-          TestBuilder
+    <div className="min-h-screen flex bg-muted/40">
+      <aside className="w-60 shrink-0 border-r bg-sidebar flex flex-col">
+        <div className="h-16 flex items-center gap-2.5 px-5 border-b">
+          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-sm">
+            <ClipboardList className="h-4 w-4" />
+          </span>
+          <span className="font-heading text-base font-semibold tracking-tight text-sidebar-foreground">
+            TestBuilder
+          </span>
         </div>
         <nav className="flex-1 p-3 space-y-1">
+          <p className="px-3 pb-1 pt-2 text-[0.7rem] font-semibold uppercase tracking-wider text-muted-foreground/70">
+            Workspace
+          </p>
           {NAV.map(({ href, label, icon: Icon }) => {
             const active =
               href === "/admin" ? pathname === "/admin" : pathname.startsWith(href);
@@ -46,10 +54,10 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
                 key={href}
                 href={href}
                 className={cn(
-                  "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                  "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all",
                   active
-                    ? "bg-primary text-primary-foreground"
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                    ? "bg-primary text-primary-foreground shadow-sm"
+                    : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
                 )}
               >
                 <Icon className="h-4 w-4" />
@@ -58,12 +66,17 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
             );
           })}
         </nav>
-        <div className="p-3 border-t space-y-2">
-          <p className="px-3 text-xs text-muted-foreground truncate">{name}</p>
+        <div className="p-3 border-t space-y-1">
+          <div className="flex items-center gap-2.5 px-2 py-1.5">
+            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-accent text-xs font-semibold text-accent-foreground">
+              {(name || "A").slice(0, 1).toUpperCase()}
+            </span>
+            <p className="text-xs font-medium text-sidebar-foreground truncate">{name}</p>
+          </div>
           <Button
             variant="ghost"
             size="sm"
-            className="w-full justify-start gap-2"
+            className="w-full justify-start gap-2 text-sidebar-foreground/70"
             onClick={() => {
               setToken("admin", null);
               router.push("/admin/login");

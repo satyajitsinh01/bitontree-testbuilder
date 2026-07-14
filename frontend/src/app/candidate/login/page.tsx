@@ -72,9 +72,9 @@ export default function CandidateLogin() {
   }
 
   return (
-    <main className="min-h-screen flex items-center justify-center bg-muted/40 p-6">
+    <main className="min-h-screen flex items-center justify-center bg-gradient-to-br from-muted/60 via-background to-accent/40 p-6">
       <div className="w-full max-w-sm space-y-4">
-        <Card>
+        <Card className="shadow-xl shadow-foreground/5">
           <CardHeader>
             <CardTitle>Candidate sign in</CardTitle>
             <CardDescription>

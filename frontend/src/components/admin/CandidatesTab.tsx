@@ -33,6 +33,40 @@ function toLocalInputValue(offsetMinutes: number): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const PHONE_RE = /^[+\d][\d\s\-()]{6,19}$/;
+
+type CandidateForm = {
+  fullName: string;
+  email: string;
+  phone: string;
+  startAt: string;
+  endAt: string;
+};
+
+function validateCandidate(form: CandidateForm): Partial<Record<keyof CandidateForm, string>> {
+  const errors: Partial<Record<keyof CandidateForm, string>> = {};
+  if (form.fullName.trim().length < 2) errors.fullName = "Enter the candidate's full name.";
+  if (!form.email.trim()) errors.email = "Email is required.";
+  else if (!EMAIL_RE.test(form.email.trim())) errors.email = "Enter a valid email address.";
+  if (form.phone.trim() && !PHONE_RE.test(form.phone.trim()))
+    errors.phone = "Enter a valid phone number (digits, spaces, + - ( ) allowed).";
+  if (!form.startAt) errors.startAt = "Start time is required.";
+  if (!form.endAt) errors.endAt = "End time is required.";
+  if (form.startAt && form.endAt) {
+    const start = new Date(form.startAt).getTime();
+    const end = new Date(form.endAt).getTime();
+    if (end <= start) errors.endAt = "End must be after the start time.";
+    else if (end <= Date.now()) errors.endAt = "End time is already in the past.";
+  }
+  return errors;
+}
+
+function FieldError({ message }: { message?: string }) {
+  if (!message) return null;
+  return <p className="text-xs font-medium text-destructive">{message}</p>;
+}
+
 function AddCandidateDialog({
   assessmentId,
   onDone,
@@ -41,24 +75,40 @@ function AddCandidateDialog({
   onDone: () => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [fullName, setFullName] = useState("");
-  const [email, setEmail] = useState("");
-  const [phone, setPhone] = useState("");
-  const [startAt, setStartAt] = useState(toLocalInputValue(0));
-  const [endAt, setEndAt] = useState(toLocalInputValue(240));
+  const [form, setForm] = useState<CandidateForm>({
+    fullName: "",
+    email: "",
+    phone: "",
+    startAt: toLocalInputValue(0),
+    endAt: toLocalInputValue(240),
+  });
+  const [touched, setTouched] = useState<Partial<Record<keyof CandidateForm, boolean>>>({});
   const [sendEmail, setSendEmail] = useState(true);
   const [credentials, setCredentials] = useState<AssignmentOut | null>(null);
+
+  const errors = validateCandidate(form);
+  const isValid = Object.keys(errors).length === 0;
+
+  function field(name: keyof CandidateForm) {
+    return {
+      value: form[name],
+      onChange: (e: React.ChangeEvent<HTMLInputElement>) =>
+        setForm((prev) => ({ ...prev, [name]: e.target.value })),
+      onBlur: () => setTouched((prev) => ({ ...prev, [name]: true })),
+      "aria-invalid": touched[name] && !!errors[name],
+    };
+  }
 
   const add = useMutation({
     mutationFn: () =>
       api<AssignmentOut>(`/assessments/${assessmentId}/assignments`, {
         token: "admin",
         body: {
-          full_name: fullName,
-          email,
-          phone,
-          window_start_at: new Date(startAt).toISOString(),
-          window_end_at: new Date(endAt).toISOString(),
+          full_name: form.fullName.trim(),
+          email: form.email.trim(),
+          phone: form.phone.trim(),
+          window_start_at: new Date(form.startAt).toISOString(),
+          window_end_at: new Date(form.endAt).toISOString(),
           send_email: sendEmail,
         },
       }),
@@ -70,11 +120,21 @@ function AddCandidateDialog({
     onError: (error) => toast.error(errorText(error)),
   });
 
+  function submit() {
+    setTouched({ fullName: true, email: true, phone: true, startAt: true, endAt: true });
+    if (isValid) add.mutate();
+  }
+
   function reset() {
     setCredentials(null);
-    setFullName("");
-    setEmail("");
-    setPhone("");
+    setTouched({});
+    setForm({
+      fullName: "",
+      email: "",
+      phone: "",
+      startAt: toLocalInputValue(0),
+      endAt: toLocalInputValue(240),
+    });
   }
 
   return (
@@ -109,39 +169,37 @@ function AddCandidateDialog({
         ) : (
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Full name</Label>
-                <Input value={fullName} onChange={(e) => setFullName(e.target.value)} />
+              <div className="space-y-1.5">
+                <Label htmlFor="cand-name">Full name</Label>
+                <Input id="cand-name" placeholder="Jane Doe" {...field("fullName")} />
+                {touched.fullName && <FieldError message={errors.fullName} />}
               </div>
-              <div className="space-y-2">
-                <Label>Email</Label>
+              <div className="space-y-1.5">
+                <Label htmlFor="cand-email">Email</Label>
                 <Input
+                  id="cand-email"
                   type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="jane@example.com"
+                  {...field("email")}
                 />
+                {touched.email && <FieldError message={errors.email} />}
               </div>
             </div>
-            <div className="space-y-2">
-              <Label>Phone</Label>
-              <Input value={phone} onChange={(e) => setPhone(e.target.value)} />
+            <div className="space-y-1.5">
+              <Label htmlFor="cand-phone">Phone (optional)</Label>
+              <Input id="cand-phone" placeholder="+91 12345 67890" {...field("phone")} />
+              {touched.phone && <FieldError message={errors.phone} />}
             </div>
             <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Window start</Label>
-                <Input
-                  type="datetime-local"
-                  value={startAt}
-                  onChange={(e) => setStartAt(e.target.value)}
-                />
+              <div className="space-y-1.5">
+                <Label htmlFor="cand-start">Window start</Label>
+                <Input id="cand-start" type="datetime-local" {...field("startAt")} />
+                {touched.startAt && <FieldError message={errors.startAt} />}
               </div>
-              <div className="space-y-2">
-                <Label>Window end</Label>
-                <Input
-                  type="datetime-local"
-                  value={endAt}
-                  onChange={(e) => setEndAt(e.target.value)}
-                />
+              <div className="space-y-1.5">
+                <Label htmlFor="cand-end">Window end</Label>
+                <Input id="cand-end" type="datetime-local" {...field("endAt")} />
+                {touched.endAt && <FieldError message={errors.endAt} />}
               </div>
             </div>
             <label className="flex items-center gap-2 text-sm">
@@ -154,10 +212,10 @@ function AddCandidateDialog({
             </label>
             <Button
               className="w-full"
-              onClick={() => add.mutate()}
-              disabled={!fullName.trim() || !email.trim() || add.isPending}
+              onClick={submit}
+              disabled={!isValid || add.isPending}
             >
-              Add candidate
+              {add.isPending ? "Adding…" : "Add candidate"}
             </Button>
           </div>
         )}
