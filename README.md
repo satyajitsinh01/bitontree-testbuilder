@@ -48,14 +48,24 @@ Without configuration the following fallbacks are active (see `backend/.env.exam
 | Resend     | Console transport (emails logged, marked sent)                  |
 | S3         | Local disk `backend/storage_local/`                             |
 
-## Production services
+## Full local stack (Docker)
 
 ```bash
 docker compose -f infra/docker-compose.yml up -d   # postgres, pgbouncer, redis, minio, judge0
+cd backend
+uv run alembic upgrade head                        # apply schema to Postgres
+uv run python -m testbuilder.seed
+uv run uvicorn testbuilder.main:app --port 8000
 ```
 
-Then point the backend at them via `backend/.env` (`TB_DATABASE_URL`, `TB_JUDGE0_URL`,
-`TB_S3_*`, `TB_REDIS_URL`) and set real `TB_GEMINI_API_KEY` / `TB_RESEND_API_KEY`.
+`backend/.env` (gitignored) points the API at the compose services:
+Postgres on host port **15432** (5432/5433 are commonly taken by native installs),
+Judge0 on **2358**, Redis on **6379**, MinIO on **9000** (console **9001**).
+Add your own `TB_S3_*`, `TB_GEMINI_API_KEY`, and `TB_RESEND_API_KEY` to enable
+object storage, real AI, and real email — everything else falls back safely.
+
+Schema changes go through Alembic: `uv run alembic revision --autogenerate -m "..."`
+then `uv run alembic upgrade head`.
 
 ## Tests
 

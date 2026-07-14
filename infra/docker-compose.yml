@@ -7,7 +7,8 @@ services:
       POSTGRES_USER: testbuilder
       POSTGRES_PASSWORD: testbuilder
       POSTGRES_DB: testbuilder
-    ports: ["5432:5432"]
+    # host port 15432: this machine runs native PostgreSQL clusters on 5432 AND 5433
+    ports: ["15432:5432"]
     volumes: [pgdata:/var/lib/postgresql/data]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U testbuilder"]
