@@ -80,7 +80,6 @@ export function DeviceCheck({
 
   useEffect(() => {
     runChecks();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function icon(value: boolean | null) {
@@ -142,6 +141,10 @@ export function DeviceCheck({
               } catch {
                 // full-screen refusal is recorded as a proctoring event once the exam starts
               }
+              sessionStorage.setItem(
+                "exam-start-viewport",
+                JSON.stringify({ width: window.innerWidth, height: window.innerHeight })
+              );
               onReady();
             }}
           >

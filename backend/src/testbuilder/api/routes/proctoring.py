@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -15,8 +16,9 @@ from ...models import (
 )
 from ...models.base import now_utc
 from ...models.proctoring import CLIENT_EVENT_KINDS
+from ...services.ai import analyze_proctoring_image
 from ...services.sessions import get_active_session
-from ...storage import put_base64_image
+from ...storage import get_object, put_base64_image
 from ..deps import AdminContext, CandidateContext, get_candidate, require_roles
 
 router = APIRouter(tags=["proctoring"])
@@ -35,6 +37,9 @@ DEFAULT_SEVERITY = {
     "capture_failed": "info",
     "devtools_open": "red_flag",
     "multi_display": "warning",
+    "window_resize": "red_flag",
+    "print_screen_attempt": "red_flag",
+    "blocked_shortcut": "red_flag",
 }
 
 
@@ -138,6 +143,32 @@ async def ingest_evidence(
         captured_at=_clamp_occurred(body.captured_at, now_utc()),
     )
     db.add(evidence)
+    await db.flush()
+    content = get_object(object_key)
+    if content is not None:
+        try:
+            mime_type = "image/png" if object_key.endswith(".png") else "image/jpeg"
+            analysis = await asyncio.to_thread(analyze_proctoring_image, content, mime_type)
+            evidence.analysis = analysis
+            evidence.analyzed = True
+            for flag in analysis.get("flags", []):
+                db.add(
+                    ProctoringEvent(
+                        session_id=session.id,
+                        kind=flag,
+                        severity="red_flag",
+                        occurred_at=evidence.captured_at,
+                        detail={
+                            "confidence": analysis.get("confidence", 0),
+                            "note": analysis.get("note", ""),
+                            "model": analysis.get("model", "stub"),
+                        },
+                        evidence_id=evidence.id,
+                    )
+                )
+        except Exception:
+            evidence.analysis = {"flags": [], "error": "AI analysis unavailable"}
+            evidence.analyzed = False
     await db.commit()
     return {"data": {"evidence_id": evidence.id, "object_key": object_key}, "error": None}
 

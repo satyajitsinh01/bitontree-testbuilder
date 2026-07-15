@@ -17,6 +17,9 @@ CLIENT_EVENT_KINDS = (
     "capture_failed",
     "devtools_open",
     "multi_display",
+    "window_resize",
+    "print_screen_attempt",
+    "blocked_shortcut",
 )
 AI_EVENT_KINDS = ("face_missing", "multiple_faces", "gaze_away", "object_detected")
 SEVERITIES = ("info", "warning", "red_flag")
