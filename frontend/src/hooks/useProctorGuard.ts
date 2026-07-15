@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef } from "react";
+import type { RefObject } from "react";
 import { api } from "@/lib/api";
 
 type EventKind =
@@ -13,7 +14,8 @@ type EventKind =
   | "capture_failed"
   | "devtools_open"
   | "screen_capture_attempt"
-  | "window_resized";
+  | "window_resized"
+  | "screen_share_stopped";
 
 interface ProctorEvent {
   kind: EventKind;
@@ -23,30 +25,79 @@ interface ProctorEvent {
 
 const FLUSH_INTERVAL_MS = 4000;
 const SCREENSHOT_INTERVAL_MS = 5000;
+const VIOLATION_CAPTURE_THROTTLE_MS = 1500;
 const DEVTOOLS_POLL_MS = 2000;
 const DEVTOOLS_GAP_PX = 200;
 const RESIZE_TOLERANCE_PX = 40;
 const RESIZE_DEBOUNCE_MS = 600;
 
-// devtools / view-source key combos to block outright
+// kinds that should trigger a full-screen violation screenshot
+const VIOLATION_KINDS = new Set<EventKind>([
+  "tab_switch",
+  "window_blur",
+  "fullscreen_exit",
+  "copy_attempt",
+  "paste_attempt",
+  "devtools_open",
+  "screen_capture_attempt",
+  "window_resized",
+  "camera_lost",
+  "screen_share_stopped",
+]);
+
 function isDevtoolsCombo(e: KeyboardEvent): string | null {
   if (e.key === "F12") return "F12";
   if (e.ctrlKey && e.shiftKey && ["I", "J", "C", "i", "j", "c"].includes(e.key))
     return `Ctrl+Shift+${e.key.toUpperCase()}`;
   if (e.ctrlKey && ["U", "u"].includes(e.key)) return "Ctrl+U";
   if (e.ctrlKey && ["S", "s", "P", "p"].includes(e.key))
-    return `Ctrl+${e.key.toUpperCase()}`; // save page / print
+    return `Ctrl+${e.key.toUpperCase()}`;
   return null;
 }
 
 /** Client half of proctoring (FR-070..072): raises red-flag events for tab
  * switches, app/window switches, devtools & right-click attempts, screenshot
- * key presses, and window shrinking below its starting size; captures periodic
- * webcam snapshots. */
-export function useProctorGuard(active: boolean, onWarning: (message: string) => void) {
+ * key presses, and window shrinking; captures periodic webcam frames AND a
+ * full-screen screenshot on every violation (stored under .../violations). */
+export function useProctorGuard(
+  active: boolean,
+  onWarning: (message: string) => void,
+  screenStreamRef?: RefObject<MediaStream | null>
+) {
   const queue = useRef<ProctorEvent[]>([]);
-  const stream = useRef<MediaStream | null>(null);
-  const video = useRef<HTMLVideoElement | null>(null);
+  const webcamStream = useRef<MediaStream | null>(null);
+  const webcamVideo = useRef<HTMLVideoElement | null>(null);
+  const screenVideo = useRef<HTMLVideoElement | null>(null);
+  const lastViolationCapture = useRef(0);
+
+  const captureViolationScreenshot = useCallback(async () => {
+    const source = screenVideo.current;
+    if (!source || source.videoWidth === 0) return;
+    const now = Date.now();
+    if (now - lastViolationCapture.current < VIOLATION_CAPTURE_THROTTLE_MS) return;
+    lastViolationCapture.current = now;
+    const maxWidth = 1280;
+    const scale = Math.min(1, maxWidth / source.videoWidth);
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(source.videoWidth * scale);
+    canvas.height = Math.round(source.videoHeight * scale);
+    const context = canvas.getContext("2d");
+    if (!context) return;
+    context.drawImage(source, 0, 0, canvas.width, canvas.height);
+    const dataUrl = canvas.toDataURL("image/jpeg", 0.7);
+    try {
+      await api("/exam/proctoring/evidence", {
+        token: "candidate",
+        body: { image_base64: dataUrl, kind: "screen" },
+      });
+    } catch {
+      queue.current.push({
+        kind: "capture_failed",
+        occurred_at: new Date().toISOString().replace("Z", ""),
+        detail: { reason: "violation screenshot upload failed" },
+      });
+    }
+  }, []);
 
   const push = useCallback(
     (kind: EventKind, detail?: Record<string, unknown>) => {
@@ -55,14 +106,30 @@ export function useProctorGuard(active: boolean, onWarning: (message: string) =>
         occurred_at: new Date().toISOString().replace("Z", ""),
         detail,
       });
+      if (VIOLATION_KINDS.has(kind)) {
+        void captureViolationScreenshot();
+      }
     },
-    []
+    [captureViolationScreenshot]
   );
 
   useEffect(() => {
     if (!active) return;
 
-    // window size baseline: shrinking below the starting size is a red flag
+    // attach the (already-granted) screen stream to a hidden video for frame grabs
+    const screenStream = screenStreamRef?.current ?? null;
+    if (screenStream) {
+      const element = document.createElement("video");
+      element.srcObject = screenStream;
+      element.muted = true;
+      element.play().catch(() => {});
+      screenVideo.current = element;
+      screenStream.getVideoTracks()[0]?.addEventListener("ended", () => {
+        push("screen_share_stopped");
+        onWarning("Screen sharing was stopped — this is a red flag. Restart to continue.");
+      });
+    }
+
     const baseline = { width: window.innerWidth, height: window.innerHeight };
     let resizeTimer: ReturnType<typeof setTimeout> | null = null;
     let devtoolsFlagged = false;
@@ -108,7 +175,6 @@ export function useProctorGuard(active: boolean, onWarning: (message: string) =>
       }
     };
     const onKeyUp = (e: KeyboardEvent) => {
-      // PrintScreen only reliably fires on keyup
       if (e.key === "PrintScreen") {
         push("screen_capture_attempt", { reason: "print_screen" });
         navigator.clipboard?.writeText("").catch(() => {});
@@ -142,8 +208,6 @@ export function useProctorGuard(active: boolean, onWarning: (message: string) =>
     window.addEventListener("keyup", onKeyUp, true);
     window.addEventListener("resize", onResize);
 
-    // best-effort docked-devtools heuristic: a large outer/inner gap appears
-    // when the devtools panel opens inside the window
     const devtoolsPoll = setInterval(() => {
       const gapWidth = window.outerWidth - window.innerWidth;
       const gapHeight = window.outerHeight - window.innerHeight;
@@ -166,22 +230,22 @@ export function useProctorGuard(active: boolean, onWarning: (message: string) =>
           body: { events: batch },
         });
       } catch {
-        queue.current.unshift(...batch); // retry next tick
+        queue.current.unshift(...batch);
       }
     }, FLUSH_INTERVAL_MS);
 
-    // webcam screenshot loop (FR-072)
+    // periodic webcam snapshots (kind "screenshot" -> .../webcam)
     let screenshotTimer: ReturnType<typeof setInterval> | null = null;
     (async () => {
       try {
-        stream.current = await navigator.mediaDevices.getUserMedia({ video: true });
+        webcamStream.current = await navigator.mediaDevices.getUserMedia({ video: true });
         const element = document.createElement("video");
-        element.srcObject = stream.current;
+        element.srcObject = webcamStream.current;
         element.muted = true;
         await element.play();
-        video.current = element;
+        webcamVideo.current = element;
         screenshotTimer = setInterval(async () => {
-          const source = video.current;
+          const source = webcamVideo.current;
           if (!source || source.videoWidth === 0) return;
           const canvas = document.createElement("canvas");
           canvas.width = 320;
@@ -196,10 +260,10 @@ export function useProctorGuard(active: boolean, onWarning: (message: string) =>
               body: { image_base64: dataUrl, kind: "screenshot" },
             });
           } catch {
-            push("capture_failed", { reason: "upload failed" });
+            push("capture_failed", { reason: "webcam upload failed" });
           }
         }, SCREENSHOT_INTERVAL_MS);
-        stream.current.getVideoTracks()[0]?.addEventListener("ended", () => {
+        webcamStream.current.getVideoTracks()[0]?.addEventListener("ended", () => {
           push("camera_lost");
           onWarning("Camera access lost — restore it to continue.");
         });
@@ -222,7 +286,8 @@ export function useProctorGuard(active: boolean, onWarning: (message: string) =>
       clearInterval(flusher);
       if (resizeTimer) clearTimeout(resizeTimer);
       if (screenshotTimer) clearInterval(screenshotTimer);
-      stream.current?.getTracks().forEach((track) => track.stop());
+      webcamStream.current?.getTracks().forEach((track) => track.stop());
+      screenVideo.current = null;
     };
-  }, [active, push, onWarning]);
+  }, [active, push, onWarning, screenStreamRef]);
 }

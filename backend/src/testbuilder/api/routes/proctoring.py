@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ...db import get_db
 from ...models import (
     Assessment,
+    Candidate,
     ExamSession,
     ProctoringEvent,
     ProctoringEvidence,
@@ -16,7 +17,7 @@ from ...models import (
 from ...models.base import now_utc
 from ...models.proctoring import CLIENT_EVENT_KINDS
 from ...services.sessions import get_active_session
-from ...storage import put_base64_image
+from ...storage import evidence_prefix, put_base64_image
 from ..deps import AdminContext, CandidateContext, get_candidate, require_roles
 
 router = APIRouter(tags=["proctoring"])
@@ -39,6 +40,7 @@ DEFAULT_SEVERITY = {
     "multi_display": "warning",
     "screen_capture_attempt": "red_flag",
     "window_resized": "red_flag",
+    "screen_share_stopped": "red_flag",
 }
 
 
@@ -107,6 +109,7 @@ async def ingest_events(
 
 
 class EvidenceIn(BaseModel):
+    # "screenshot" = periodic webcam frame; "screen" = full-screen violation capture
     kind: str = "screenshot"
     image_base64: str  # data URL or bare base64 (direct-to-S3 presign in prod, R8)
     captured_at: datetime | None = None
@@ -121,8 +124,19 @@ async def ingest_evidence(
     session = await get_active_session(db, ctx.assignment.id)
     if session is None:
         raise HTTPException(409, "no_active_session")
+    candidate = (
+        await db.execute(select(Candidate).where(Candidate.id == ctx.assignment.candidate_id))
+    ).scalar_one()
+    assessment = (
+        await db.execute(
+            select(Assessment).where(Assessment.id == ctx.assignment.assessment_id)
+        )
+    ).scalar_one()
+    # full-screen violation captures go under .../violations, webcam under .../webcam
+    subdir = "violations" if body.kind == "screen" else "webcam"
+    prefix = evidence_prefix(assessment.title, assessment.id, candidate.email, subdir)
     try:
-        object_key = put_base64_image(f"evidence/{session.id}", body.image_base64)
+        object_key = put_base64_image(prefix, body.image_base64)
     except Exception:
         db.add(
             ProctoringEvent(

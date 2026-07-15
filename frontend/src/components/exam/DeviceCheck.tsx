@@ -26,8 +26,9 @@ export function DeviceCheck({
   onReady,
 }: {
   rules: string[];
-  onReady: () => void;
+  onReady: (screenStream: MediaStream) => void;
 }) {
+  const [starting, setStarting] = useState(false);
   const [checks, setChecks] = useState<CheckState>({
     camera: null,
     microphone: null,
@@ -80,7 +81,6 @@ export function DeviceCheck({
 
   useEffect(() => {
     runChecks();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function icon(value: boolean | null) {
@@ -133,19 +133,50 @@ export function DeviceCheck({
             />
             I have read and accept the exam rules and monitoring described above.
           </label>
+          <p className="rounded-lg border bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+            When you start, your browser will ask you to share your <strong>entire
+            screen</strong>. This is required for proctoring — screenshots of your
+            screen are captured if a violation occurs. Sharing is mandatory to begin.
+          </p>
           <Button
             className="w-full"
-            disabled={!allPassed || !acknowledged}
+            disabled={!allPassed || !acknowledged || starting}
             onClick={async () => {
+              setStarting(true);
+              let screenStream: MediaStream;
+              try {
+                screenStream = await navigator.mediaDevices.getDisplayMedia({
+                  video: { displaySurface: "monitor" } as MediaTrackConstraints,
+                  audio: false,
+                });
+              } catch {
+                setStarting(false);
+                toast.error(
+                  "Screen sharing is required to start. Please allow it and share your entire screen."
+                );
+                return;
+              }
+              // require the whole screen, not a single tab/window
+              const surface = (
+                screenStream.getVideoTracks()[0]?.getSettings() as
+                  | { displaySurface?: string }
+                  | undefined
+              )?.displaySurface;
+              if (surface && surface !== "monitor") {
+                screenStream.getTracks().forEach((t) => t.stop());
+                setStarting(false);
+                toast.error("Please share your entire screen (not a single window or tab).");
+                return;
+              }
               try {
                 await document.documentElement.requestFullscreen();
               } catch {
                 // full-screen refusal is recorded as a proctoring event once the exam starts
               }
-              onReady();
+              onReady(screenStream);
             }}
           >
-            Start assessment
+            {starting ? "Starting…" : "Start assessment"}
           </Button>
         </CardContent>
       </Card>

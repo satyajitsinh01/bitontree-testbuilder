@@ -102,7 +102,10 @@ async def test_evidence_upload_and_flag_counts_in_report(client, admin):
         headers=headers,
     )
     assert upload.status_code == 200
-    assert upload.json()["data"]["object_key"].startswith("evidence/")
+    key = upload.json()["data"]["object_key"]
+    # browsable layout: {assessment-slug}-{id8}/{email}/webcam/...
+    assert "/jane@example.com/webcam/" in key
+    assert key.startswith("backend-screening-")
 
     await client.post(
         "/api/v1/exam/proctoring/events",
@@ -169,6 +172,26 @@ async def test_hardening_kinds_are_red_flags(client, admin):
     assert red_kinds == {
         "devtools_open", "screen_capture_attempt", "window_resized", "window_blur",
     }
+
+
+async def test_violation_screenshot_stored_under_violations(client, admin):
+    """Full-screen violation captures (kind=screen) go to the violations subdir."""
+    _, headers, state = await _live_session(client, admin)
+    upload = await client.post(
+        "/api/v1/exam/proctoring/evidence",
+        json={"kind": "screen", "image_base64": f"data:image/png;base64,{TINY_PNG}"},
+        headers=headers,
+    )
+    assert upload.status_code == 200
+    key = upload.json()["data"]["object_key"]
+    assert "/jane@example.com/violations/" in key
+
+    timeline = await client.get(
+        f"/api/v1/sessions/{state['session_id']}/proctoring/timeline",
+        headers=admin["headers"],
+    )
+    evidence = timeline.json()["data"]["evidence"]
+    assert any(e["kind"] == "screen" for e in evidence)
 
 
 async def test_candidate_cannot_read_timeline(client, admin):

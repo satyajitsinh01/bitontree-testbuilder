@@ -46,6 +46,8 @@ async def exam_summary(
             "status": ctx.assignment.status,
             "rules": [
                 "Full-screen mode is required for the entire exam.",
+                "You must share your entire screen; a screenshot of your screen is "
+                "captured whenever a violation occurs.",
                 "Camera and microphone must stay enabled; periodic snapshots are taken.",
                 "Switching to any other app, tab or window is recorded as a red flag.",
                 "Developer tools, right-click, copy/paste and screenshots are disabled; "

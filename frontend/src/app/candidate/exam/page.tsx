@@ -45,8 +45,18 @@ export default function ExamPage() {
   const [state, setState] = useState<ExamState | null>(null);
   const [endedReason, setEndedReason] = useState("");
 
+  const screenStreamRef = useRef<MediaStream | null>(null);
   const warn = useCallback((message: string) => toast.warning(message), []);
-  useProctorGuard(phase === "exam", warn);
+  useProctorGuard(phase === "exam", warn, screenStreamRef);
+
+  // After the assessment ends, drop full screen and stop screen sharing.
+  useEffect(() => {
+    if (phase === "done" || phase === "ended") {
+      if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+      screenStreamRef.current?.getTracks().forEach((track) => track.stop());
+      screenStreamRef.current = null;
+    }
+  }, [phase]);
 
   const refreshState = useCallback(async () => {
     try {
@@ -91,7 +101,8 @@ export default function ExamPage() {
     })();
   }, [router, refreshState]);
 
-  async function startExam() {
+  async function startExam(screenStream: MediaStream) {
+    screenStreamRef.current = screenStream;
     try {
       const next = await api<ExamState>("/exam/start", {
         token: "candidate",
@@ -103,6 +114,8 @@ export default function ExamPage() {
       if (error instanceof ApiError && error.code === "session_active") {
         await refreshState();
       } else {
+        screenStream.getTracks().forEach((track) => track.stop());
+        screenStreamRef.current = null;
         toast.error(errorText(error));
       }
     }

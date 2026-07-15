@@ -35,6 +35,7 @@ def _invitation_payload(
         "window_end_ist": end_ist.isoformat(),
         "rules": [
             "Camera and microphone access is required for the entire exam.",
+            "You must share your entire screen; screenshots are taken on violations.",
             "The exam runs in full screen; leaving full screen is recorded.",
             "Switching to any other app, tab or window is recorded as a red flag.",
             "Developer tools, right-click, copy/paste and screenshots are disabled; "

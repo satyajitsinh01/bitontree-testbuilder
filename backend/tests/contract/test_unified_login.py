@@ -102,14 +102,19 @@ async def test_submitted_assessment_invalidates_credentials(client, admin):
     assert legacy.status_code == 401
 
 
-async def test_exam_duration_is_sum_of_section_minutes(client, admin):
-    """ends_at - started_at == sum of section durations (10 + 10 here), because the
-    candidate window is much wider."""
-    from datetime import datetime
+async def test_exam_duration_matches_assessment_window(client, admin):
+    """Under the fixed-window model the section durations must sum to the assessment
+    window, and the session ends exactly at that window end."""
+    from datetime import datetime, timedelta
 
     assessment = await build_published_assessment(
         client, admin, with_coding=False, section_minutes=(10, 10)
     )
+    # 10 + 10 section minutes == the 20-minute assessment window
+    window_start = datetime.fromisoformat(assessment["window_start_at"])
+    window_end = datetime.fromisoformat(assessment["window_end_at"])
+    assert window_end - window_start == timedelta(minutes=20)
+
     assignment = await add_candidate(client, admin, assessment["id"], email="t@example.com")
     login = await client.post(
         "/api/v1/auth/login",
@@ -120,7 +125,6 @@ async def test_exam_duration_is_sum_of_section_minutes(client, admin):
         await client.post("/api/v1/exam/start", json={"acknowledged_rules": True},
                           headers=headers)
     ).json()["data"]
+    # the session ends at the assessment window end (never later)
     ends = datetime.fromisoformat(state["ends_at"])
-    server_now = datetime.fromisoformat(state["server_now"])
-    minutes = (ends - server_now).total_seconds() / 60
-    assert 19.5 <= minutes <= 20.1
+    assert abs((ends - window_end).total_seconds()) <= 1
