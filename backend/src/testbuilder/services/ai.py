@@ -28,11 +28,11 @@ def _client():
     return genai.Client(api_key=get_settings().gemini_api_key)
 
 
-def _gemini_json(prompt: str) -> dict:
+def _gemini_json(prompt: str, *, model: str | None = None) -> dict:
     settings = get_settings()
     client = _client()
     response = client.models.generate_content(
-        model=settings.gemini_model,
+        model=model or settings.gemini_model,
         contents=prompt,
         config={"response_mime_type": "application/json"},
     )
@@ -162,7 +162,8 @@ def summarize_performance(report_payload: dict) -> str:
     data = _gemini_json(
         "Summarize this assessment result for a recruiter in <=120 words. Mention strengths "
         "and weaknesses per section. Return strict JSON {\"summary\": str}. Data: "
-        + json.dumps(report_payload)
+        + json.dumps(report_payload),
+        model=settings.gemini_report_model,
     )
     return "[AI-generated] " + str(data.get("summary", ""))
 
@@ -170,3 +171,33 @@ def summarize_performance(report_payload: dict) -> str:
 def analyze_frame_stub(object_key: str) -> dict:
     """Screenshot analysis placeholder used when Gemini is unavailable."""
     return {"flags": [], "confidence": 0.0, "note": "analysis skipped (no API key)"}
+
+
+def analyze_proctoring_image(content: bytes, mime_type: str = "image/jpeg") -> dict:
+    """Analyze a webcam frame for visible exam-integrity risks with Gemini Flash."""
+    settings = get_settings()
+    if not settings.gemini_api_key:
+        return analyze_frame_stub("local")
+
+    from google.genai import types
+
+    response = _client().models.generate_content(
+        model=settings.gemini_cheating_model,
+        contents=[
+            "Review this webcam exam frame. Flag only clearly visible integrity risks. "
+            "Allowed flags: face_missing, multiple_faces, gaze_away, object_detected. "
+            "object_detected means a phone, notes, another computer, or recording device. "
+            "Return strict JSON with flags as an array, confidence from 0 to 1, and a short note.",
+            types.Part.from_bytes(data=content, mime_type=mime_type),
+        ],
+        config={"response_mime_type": "application/json"},
+    )
+    data = json.loads(response.text)
+    allowed = {"face_missing", "multiple_faces", "gaze_away", "object_detected"}
+    flags = [flag for flag in data.get("flags", []) if flag in allowed]
+    return {
+        "flags": flags,
+        "confidence": max(0.0, min(float(data.get("confidence", 0)), 1.0)),
+        "note": str(data.get("note", ""))[:500],
+        "model": settings.gemini_cheating_model,
+    }

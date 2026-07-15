@@ -15,7 +15,7 @@ Built from the spec in [`specs/001-testbuilder-platform/`](specs/001-testbuilder
 - **Frontend**: Next.js 15 + TypeScript + Tailwind + shadcn/ui, TanStack Query,
   Monaco editor. Jest + React Testing Library.
 - **Services**: Judge0 CE (code execution), Google Gemini via `google-genai`
-  (AI features), Resend (email), S3/MinIO (evidence storage), Redis (production
+  (AI features), Resend or SMTP (email), S3/MinIO (evidence storage), Redis (production
   locks/queues). Every service has a safe local fallback so the whole product runs
   with no external dependencies.
 
@@ -45,8 +45,8 @@ Without configuration the following fallbacks are active (see `backend/.env.exam
 | PostgreSQL | SQLite file `backend/testbuilder.db`                            |
 | Gemini     | Deterministic stub (drafts still gated behind approval)         |
 | Judge0     | Fail-closed stub — code never executes on the app host          |
-| Resend     | Console transport (emails logged, marked sent)                  |
-| S3         | Local disk `backend/storage_local/`                             |
+| Resend/SMTP | Console transport (emails logged, marked sent)                 |
+| S3         | Local disk `backend/storage_local/` (also used if S3 is down)    |
 
 ## Full local stack (Docker)
 
@@ -63,6 +63,14 @@ Postgres on host port **15432** (5432/5433 are commonly taken by native installs
 Judge0 on **2358**, Redis on **6379**, MinIO on **9000** (console **9001**).
 Add your own `TB_S3_*`, `TB_GEMINI_API_KEY`, and `TB_RESEND_API_KEY` to enable
 object storage, real AI, and real email — everything else falls back safely.
+
+Gemini uses `gemini-2.5-flash` for proctoring-image cheating detection and
+`gemini-2.5-pro` for final report observations. Override these with
+`TB_GEMINI_CHEATING_MODEL` and `TB_GEMINI_REPORT_MODEL` when needed.
+
+For a deployed frontend, copy `frontend/.env.example` to `frontend/.env.local`
+and set `NEXT_PUBLIC_API_URL` to the public backend origin. Local development
+defaults to `http://localhost:8000`, so no frontend env file is required locally.
 
 Schema changes go through Alembic: `uv run alembic revision --autogenerate -m "..."`
 then `uv run alembic upgrade head`.
@@ -87,6 +95,13 @@ Without a key, emails print to the backend console (dev mode). To send real emai
 
 If you have no domain yet, Resend lets you send from `onboarding@resend.dev`
 to your own inbox only — enough for testing.
+
+### SMTP alternative
+
+If `TB_RESEND_API_KEY` is empty and `TB_SMTP_HOST` is set, invitations use SMTP.
+Configure `TB_SMTP_HOST`, `TB_SMTP_PORT`, `TB_SMTP_USERNAME`, `TB_SMTP_PASSWORD`,
+`TB_SMTP_USE_TLS`, `TB_SMTP_USE_SSL`, and `TB_EMAIL_FROM` in `backend/.env`.
+If neither Resend nor SMTP is configured, development keeps using console email.
 
 ## Question JSON import format
 

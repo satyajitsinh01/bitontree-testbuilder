@@ -46,6 +46,7 @@ interface AnswerItem {
   qtype: string;
   title: string;
   answer: Record<string, unknown> | null;
+  display_answer: Record<string, unknown> | null;
   checkpoints: { kind: string; created_at: string }[];
   code_history: {
     id: string;
@@ -316,10 +317,17 @@ export default function SessionReportPage({
                   Overridden: {item.evaluation.override_reason}
                 </p>
               )}
-              {item.answer && (
-                <pre className="rounded bg-muted p-2 text-xs overflow-x-auto max-h-40">
-                  {JSON.stringify(item.answer, null, 2)}
-                </pre>
+              {item.display_answer && (
+                <div className="rounded bg-muted p-3 text-sm space-y-1">
+                  {Object.entries(item.display_answer).map(([label, value]) => (
+                    <p key={label}>
+                      <span className="font-medium capitalize">
+                        {label.replaceAll("_", " ")}:
+                      </span>{" "}
+                      {Array.isArray(value) ? value.join(", ") : String(value)}
+                    </p>
+                  ))}
+                </div>
               )}
               {item.code_history.length > 0 && (
                 <p className="text-xs text-muted-foreground">

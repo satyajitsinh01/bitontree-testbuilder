@@ -150,6 +150,11 @@ async def test_full_candidate_and_evaluator_flow(client, admin):
     answers = (
         await client.get(f"/api/v1/sessions/{session_id}/answers", headers=admin["headers"])
     ).json()["data"]["items"]
+    mcq_answers = [answer for answer in answers if answer["qtype"] == "mcq"]
+    assert {tuple(answer["display_answer"]["selected_answers"]) for answer in mcq_answers} == {
+        ("Correct",),
+        ("Wrong 1",),
+    }
     coding_answer = next(a for a in answers if a["qtype"] == "coding")
     assert len(coding_answer["code_history"]) == 2  # run + submit (FR-066)
     text_answer = next(a for a in answers if a["qtype"] == "text")

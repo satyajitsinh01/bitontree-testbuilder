@@ -1,5 +1,8 @@
-"""Email delivery via Resend (research R10). Without TB_RESEND_API_KEY the
-transport logs to console and marks messages sent, keeping dev/test flows alive."""
+"""Email delivery via Resend, SMTP, or a local console transport."""
+
+import asyncio
+import smtplib
+from email.message import EmailMessage as SMTPMessage
 
 import httpx
 import structlog
@@ -12,6 +15,22 @@ from ..models.base import now_utc
 log = structlog.get_logger()
 
 RESEND_API = "https://api.resend.com/emails"
+
+
+def _send_smtp(to_email: str, subject: str, body: str) -> None:
+    settings = get_settings()
+    message = SMTPMessage()
+    message["From"] = settings.email_from
+    message["To"] = to_email
+    message["Subject"] = subject
+    message.set_content(body)
+    smtp_class = smtplib.SMTP_SSL if settings.smtp_use_ssl else smtplib.SMTP
+    with smtp_class(settings.smtp_host, settings.smtp_port, timeout=15) as smtp:
+        if settings.smtp_use_tls and not settings.smtp_use_ssl:
+            smtp.starttls()
+        if settings.smtp_username:
+            smtp.login(settings.smtp_username, settings.smtp_password)
+        smtp.send_message(message)
 
 
 def _invitation_payload(
@@ -86,10 +105,19 @@ async def send_email(
     db.add(message)
     subject = f"[TestBuilder] {payload.get('assessment_title', 'Assessment')} — {kind}"
     body = _render_text(kind, payload)
-    if not settings.resend_api_key:
+    if not settings.resend_api_key and not settings.smtp_host:
         log.info("email_console_transport", to=candidate.email, subject=subject)
         message.status = "sent"
         message.sent_at = now_utc()
+        return message
+    if not settings.resend_api_key:
+        try:
+            await asyncio.to_thread(_send_smtp, candidate.email, subject, body)
+            message.status = "sent"
+            message.sent_at = now_utc()
+        except (OSError, smtplib.SMTPException) as exc:
+            message.status = "failed"
+            log.warning("smtp_send_error", error=str(exc))
         return message
     try:
         async with httpx.AsyncClient(timeout=15) as client:

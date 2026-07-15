@@ -28,6 +28,25 @@ from ..deps import AdminContext, require_roles
 router = APIRouter(tags=["reports"])
 
 
+def _display_answer(qtype: str, config: dict, payload: dict | None) -> dict | None:
+    if not payload:
+        return None
+    if qtype == "mcq":
+        option_text = {
+            str(option.get("id")): str(option.get("text", ""))
+            for option in config.get("options", [])
+        }
+        selected_ids = payload.get("selected_option_ids") or []
+        correct_ids = config.get("correct_option_ids") or []
+        return {
+            "selected_answers": [option_text.get(str(item), str(item)) for item in selected_ids],
+            "correct_answers": [option_text.get(str(item), str(item)) for item in correct_ids],
+        }
+    if qtype == "text":
+        return {"answer": str(payload.get("text", ""))}
+    return payload
+
+
 async def _completed_reports(
     db: AsyncSession, assessment_id: str
 ) -> list[tuple[Report, ExamSession, TestAssignment, Candidate]]:
@@ -257,6 +276,9 @@ async def session_answers(
                 "title": version.title,
                 "config": version.config,  # full config incl. answers (admin view)
                 "answer": answer.payload if answer else None,
+                "display_answer": _display_answer(
+                    version.qtype, version.config, answer.payload if answer else None
+                ),
                 "checkpoints": checkpoints,
                 "code_history": code_history,
                 "evaluation": None

@@ -23,11 +23,19 @@ class Settings(BaseSettings):
 
     # External services; unset values switch the service to a local stub.
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-2.0-flash"
+    gemini_model: str = "gemini-2.5-flash"
+    gemini_cheating_model: str = "gemini-2.5-flash"
+    gemini_report_model: str = "gemini-2.5-pro"
     judge0_url: str = ""
     judge0_auth_token: str = ""
     resend_api_key: str = ""
     email_from: str = "TestBuilder <no-reply@testbuilder.local>"
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_use_tls: bool = True
+    smtp_use_ssl: bool = False
 
     s3_endpoint: str = ""
     s3_bucket: str = "testbuilder"
