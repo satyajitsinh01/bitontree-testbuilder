@@ -1,0 +1,293 @@
+{
+  "questions": [
+    {
+      "qtype": "coding",
+      "title": "Two Sum",
+      "difficulty": "easy",
+      "category": "Algorithms",
+      "topic": "arrays",
+      "tags": ["array", "hash-table"],
+      "answer_type": "code",
+      "config": {
+        "signature": {
+          "function_name": "twoSum",
+          "params": [
+            { "name": "nums", "type": "int[]" },
+            { "name": "target", "type": "int" }
+          ],
+          "return_type": "int[]"
+        },
+        "allowed_languages": ["python", "javascript", "java", "cpp"],
+        "description": "Given an array of integers `nums` and an integer `target`, return the **indices** of the two numbers such that they add up to `target`.\n\nYou may assume that each input has *exactly one* solution, and you may not use the same element twice. Return the indices with the smaller index first.",
+        "input_format": "- `nums`: an array of integers\n- `target`: an integer",
+        "output_format": "An array `[i, j]` with `i < j`.",
+        "constraints": "- `2 <= nums.length <= 10^4`\n- `-10^9 <= nums[i], target <= 10^9`\n- Exactly one valid answer exists.",
+        "notes": "A hash map gives an **O(n)** single-pass solution.",
+        "examples": [
+          { "input": "nums = [2,7,11,15], target = 9", "output": "[0,1]", "explanation": "`nums[0] + nums[1] == 9`." },
+          { "input": "nums = [3,2,4], target = 6", "output": "[1,2]", "explanation": "`nums[1] + nums[2] == 6`." }
+        ],
+        "test_cases": [
+          { "id": "s1", "args": [[2, 7, 11, 15], 9], "expected": [0, 1], "is_hidden": false, "weight": 1 },
+          { "id": "s2", "args": [[3, 2, 4], 6], "expected": [1, 2], "is_hidden": false, "weight": 1 },
+          { "id": "h1", "args": [[3, 3], 6], "expected": [0, 1], "is_hidden": true, "weight": 1 },
+          { "id": "h2", "args": [[-1, -2, -3, -4], -6], "expected": [1, 3], "is_hidden": true, "weight": 1 },
+          { "id": "h3", "args": [[0, 4, 3, 0], 0], "expected": [0, 3], "is_hidden": true, "weight": 1 }
+        ],
+        "time_limit_ms": 5000,
+        "memory_limit_kb": 256000,
+        "show_case_results": "visible_only"
+      }
+    },
+    {
+      "qtype": "coding",
+      "title": "Sum of Array",
+      "difficulty": "easy",
+      "category": "Algorithms",
+      "topic": "arrays",
+      "tags": ["array"],
+      "answer_type": "code",
+      "config": {
+        "signature": {
+          "function_name": "arraySum",
+          "params": [{ "name": "nums", "type": "int[]" }],
+          "return_type": "int"
+        },
+        "allowed_languages": ["python", "javascript", "java", "cpp"],
+        "description": "Return the **sum** of all integers in the array `nums`.\n\nIf the array is empty, return `0`.",
+        "input_format": "- `nums`: an array of integers",
+        "output_format": "A single integer — the sum of all elements.",
+        "constraints": "- `0 <= nums.length <= 10^5`\n- `-10^4 <= nums[i] <= 10^4`",
+        "examples": [
+          { "input": "nums = [1,2,3,4,5]", "output": "15", "explanation": "1+2+3+4+5 = 15." },
+          { "input": "nums = []", "output": "0", "explanation": "Empty array sums to 0." }
+        ],
+        "test_cases": [
+          { "id": "s1", "args": [[1, 2, 3, 4, 5]], "expected": 15, "is_hidden": false, "weight": 1 },
+          { "id": "s2", "args": [[]], "expected": 0, "is_hidden": false, "weight": 1 },
+          { "id": "h1", "args": [[-1, 1]], "expected": 0, "is_hidden": true, "weight": 1 },
+          { "id": "h2", "args": [[100]], "expected": 100, "is_hidden": true, "weight": 1 },
+          { "id": "h3", "args": [[-5, -5, -5]], "expected": -15, "is_hidden": true, "weight": 1 }
+        ],
+        "time_limit_ms": 5000,
+        "memory_limit_kb": 256000,
+        "show_case_results": "visible_only"
+      }
+    },
+    {
+      "qtype": "coding",
+      "title": "Fibonacci Number",
+      "difficulty": "easy",
+      "category": "Algorithms",
+      "topic": "dynamic-programming",
+      "tags": ["math", "recursion", "dp"],
+      "answer_type": "code",
+      "config": {
+        "signature": {
+          "function_name": "fib",
+          "params": [{ "name": "n", "type": "int" }],
+          "return_type": "int"
+        },
+        "allowed_languages": ["python", "javascript", "java", "cpp"],
+        "description": "The **Fibonacci** numbers, commonly denoted `F(n)`, form a sequence where each number is the sum of the two preceding ones, starting from `0` and `1`:\n\n```\nF(0) = 0, F(1) = 1\nF(n) = F(n-1) + F(n-2)  for n > 1\n```\n\nGiven `n`, return `F(n)`.",
+        "input_format": "- `n`: a non-negative integer",
+        "output_format": "The n-th Fibonacci number.",
+        "constraints": "- `0 <= n <= 30`",
+        "examples": [
+          { "input": "n = 2", "output": "1", "explanation": "F(2) = F(1) + F(0) = 1 + 0 = 1." },
+          { "input": "n = 5", "output": "5", "explanation": "0, 1, 1, 2, 3, 5 — F(5) = 5." }
+        ],
+        "test_cases": [
+          { "id": "s1", "args": [2], "expected": 1, "is_hidden": false, "weight": 1 },
+          { "id": "s2", "args": [5], "expected": 5, "is_hidden": false, "weight": 1 },
+          { "id": "h1", "args": [0], "expected": 0, "is_hidden": true, "weight": 1 },
+          { "id": "h2", "args": [1], "expected": 1, "is_hidden": true, "weight": 1 },
+          { "id": "h3", "args": [10], "expected": 55, "is_hidden": true, "weight": 1 },
+          { "id": "h4", "args": [20], "expected": 6765, "is_hidden": true, "weight": 1 }
+        ],
+        "time_limit_ms": 5000,
+        "memory_limit_kb": 256000,
+        "show_case_results": "visible_only"
+      }
+    },
+    {
+      "qtype": "coding",
+      "title": "Valid Palindrome",
+      "difficulty": "easy",
+      "category": "Algorithms",
+      "topic": "strings",
+      "tags": ["string", "two-pointers"],
+      "answer_type": "code",
+      "config": {
+        "signature": {
+          "function_name": "isPalindrome",
+          "params": [{ "name": "s", "type": "string" }],
+          "return_type": "bool"
+        },
+        "allowed_languages": ["python", "javascript", "java", "cpp"],
+        "description": "Given a lowercase alphanumeric string `s`, return `true` if it reads the same forwards and backwards, and `false` otherwise.\n\nThe input contains only lowercase letters and digits (no spaces or punctuation). The empty string is considered a palindrome.",
+        "input_format": "- `s`: a lowercase alphanumeric string",
+        "output_format": "`true` or `false`.",
+        "constraints": "- `0 <= s.length <= 10^5`\n- `s` consists of lowercase English letters and digits only.",
+        "examples": [
+          { "input": "s = \"racecar\"", "output": "true", "explanation": "Reads the same in both directions." },
+          { "input": "s = \"hello\"", "output": "false", "explanation": "`hello` reversed is `olleh`." }
+        ],
+        "test_cases": [
+          { "id": "s1", "args": ["racecar"], "expected": true, "is_hidden": false, "weight": 1 },
+          { "id": "s2", "args": ["hello"], "expected": false, "is_hidden": false, "weight": 1 },
+          { "id": "h1", "args": ["a"], "expected": true, "is_hidden": true, "weight": 1 },
+          { "id": "h2", "args": [""], "expected": true, "is_hidden": true, "weight": 1 },
+          { "id": "h3", "args": ["abba"], "expected": true, "is_hidden": true, "weight": 1 },
+          { "id": "h4", "args": ["abc"], "expected": false, "is_hidden": true, "weight": 1 }
+        ],
+        "time_limit_ms": 5000,
+        "memory_limit_kb": 256000,
+        "show_case_results": "visible_only"
+      }
+    },
+    {
+      "qtype": "coding",
+      "title": "Count Vowels",
+      "difficulty": "easy",
+      "category": "Algorithms",
+      "topic": "strings",
+      "tags": ["string"],
+      "answer_type": "code",
+      "config": {
+        "signature": {
+          "function_name": "countVowels",
+          "params": [{ "name": "s", "type": "string" }],
+          "return_type": "int"
+        },
+        "allowed_languages": ["python", "javascript", "java", "cpp"],
+        "description": "Given a lowercase string `s`, return the number of **vowels** (`a`, `e`, `i`, `o`, `u`) it contains.",
+        "input_format": "- `s`: a lowercase string",
+        "output_format": "The count of vowels as an integer.",
+        "constraints": "- `0 <= s.length <= 10^5`\n- `s` consists of lowercase English letters only.",
+        "examples": [
+          { "input": "s = \"hello\"", "output": "2", "explanation": "The vowels are `e` and `o`." },
+          { "input": "s = \"sky\"", "output": "0", "explanation": "No vowels." }
+        ],
+        "test_cases": [
+          { "id": "s1", "args": ["hello"], "expected": 2, "is_hidden": false, "weight": 1 },
+          { "id": "s2", "args": ["sky"], "expected": 0, "is_hidden": false, "weight": 1 },
+          { "id": "h1", "args": ["aeiou"], "expected": 5, "is_hidden": true, "weight": 1 },
+          { "id": "h2", "args": ["programming"], "expected": 3, "is_hidden": true, "weight": 1 },
+          { "id": "h3", "args": [""], "expected": 0, "is_hidden": true, "weight": 1 }
+        ],
+        "time_limit_ms": 5000,
+        "memory_limit_kb": 256000,
+        "show_case_results": "visible_only"
+      }
+    },
+    {
+      "qtype": "coding",
+      "title": "Maximum Subarray",
+      "difficulty": "medium",
+      "category": "Algorithms",
+      "topic": "dynamic-programming",
+      "tags": ["array", "dp", "divide-and-conquer"],
+      "answer_type": "code",
+      "config": {
+        "signature": {
+          "function_name": "maxSubArray",
+          "params": [{ "name": "nums", "type": "int[]" }],
+          "return_type": "int"
+        },
+        "allowed_languages": ["python", "javascript", "java", "cpp"],
+        "description": "Given an integer array `nums`, find the contiguous subarray (containing at least one number) which has the **largest sum**, and return that sum.\n\nA subarray is a *contiguous* part of an array.",
+        "input_format": "- `nums`: a non-empty array of integers",
+        "output_format": "The maximum subarray sum as an integer.",
+        "constraints": "- `1 <= nums.length <= 10^5`\n- `-10^4 <= nums[i] <= 10^4`",
+        "notes": "Kadane's algorithm solves this in **O(n)**.",
+        "examples": [
+          { "input": "nums = [-2,1,-3,4,-1,2,1,-5,4]", "output": "6", "explanation": "The subarray `[4,-1,2,1]` has the largest sum `6`." },
+          { "input": "nums = [1]", "output": "1", "explanation": "The only subarray is `[1]`." }
+        ],
+        "test_cases": [
+          { "id": "s1", "args": [[-2, 1, -3, 4, -1, 2, 1, -5, 4]], "expected": 6, "is_hidden": false, "weight": 1 },
+          { "id": "s2", "args": [[1]], "expected": 1, "is_hidden": false, "weight": 1 },
+          { "id": "h1", "args": [[5, 4, -1, 7, 8]], "expected": 23, "is_hidden": true, "weight": 1 },
+          { "id": "h2", "args": [[-1]], "expected": -1, "is_hidden": true, "weight": 1 },
+          { "id": "h3", "args": [[-2, -1]], "expected": -1, "is_hidden": true, "weight": 1 }
+        ],
+        "time_limit_ms": 5000,
+        "memory_limit_kb": 256000,
+        "show_case_results": "visible_only"
+      }
+    },
+    {
+      "qtype": "coding",
+      "title": "Merge Two Sorted Arrays",
+      "difficulty": "medium",
+      "category": "Algorithms",
+      "topic": "arrays",
+      "tags": ["array", "two-pointers", "sorting"],
+      "answer_type": "code",
+      "config": {
+        "signature": {
+          "function_name": "mergeSorted",
+          "params": [
+            { "name": "a", "type": "int[]" },
+            { "name": "b", "type": "int[]" }
+          ],
+          "return_type": "int[]"
+        },
+        "allowed_languages": ["python", "javascript", "java", "cpp"],
+        "description": "You are given two arrays `a` and `b`, each sorted in **non-decreasing** order. Merge them into a single sorted array and return it.",
+        "input_format": "- `a`: a sorted array of integers\n- `b`: a sorted array of integers",
+        "output_format": "A single array containing all elements of `a` and `b` in non-decreasing order.",
+        "constraints": "- `0 <= a.length, b.length <= 10^4`\n- both arrays are already sorted ascending",
+        "examples": [
+          { "input": "a = [1,3,5], b = [2,4,6]", "output": "[1,2,3,4,5,6]", "explanation": "Interleave the two sorted arrays." },
+          { "input": "a = [], b = [1]", "output": "[1]", "explanation": "One array is empty." }
+        ],
+        "test_cases": [
+          { "id": "s1", "args": [[1, 3, 5], [2, 4, 6]], "expected": [1, 2, 3, 4, 5, 6], "is_hidden": false, "weight": 1 },
+          { "id": "s2", "args": [[], [1]], "expected": [1], "is_hidden": false, "weight": 1 },
+          { "id": "h1", "args": [[1, 2], [3, 4]], "expected": [1, 2, 3, 4], "is_hidden": true, "weight": 1 },
+          { "id": "h2", "args": [[1, 1], [1, 1]], "expected": [1, 1, 1, 1], "is_hidden": true, "weight": 1 },
+          { "id": "h3", "args": [[-3, 0], [-5, 2]], "expected": [-5, -3, 0, 2], "is_hidden": true, "weight": 1 }
+        ],
+        "time_limit_ms": 5000,
+        "memory_limit_kb": 256000,
+        "show_case_results": "visible_only"
+      }
+    },
+    {
+      "qtype": "coding",
+      "title": "Matrix Transpose",
+      "difficulty": "medium",
+      "category": "Algorithms",
+      "topic": "matrix",
+      "tags": ["matrix", "array", "simulation"],
+      "answer_type": "code",
+      "config": {
+        "signature": {
+          "function_name": "transpose",
+          "params": [{ "name": "matrix", "type": "int[][]" }],
+          "return_type": "int[][]"
+        },
+        "allowed_languages": ["python", "javascript", "java", "cpp"],
+        "description": "Given a 2-D integer matrix `matrix`, return its **transpose**.\n\nThe transpose flips the matrix over its main diagonal, swapping the row and column indices: the element at position `(i, j)` moves to `(j, i)`.",
+        "input_format": "- `matrix`: an `m x n` 2-D array of integers",
+        "output_format": "The `n x m` transposed matrix.",
+        "constraints": "- `1 <= m, n <= 1000`\n- `-10^9 <= matrix[i][j] <= 10^9`",
+        "examples": [
+          { "input": "matrix = [[1,2,3],[4,5,6]]", "output": "[[1,4],[2,5],[3,6]]", "explanation": "Rows become columns." },
+          { "input": "matrix = [[1]]", "output": "[[1]]", "explanation": "A single element is its own transpose." }
+        ],
+        "test_cases": [
+          { "id": "s1", "args": [[[1, 2, 3], [4, 5, 6]]], "expected": [[1, 4], [2, 5], [3, 6]], "is_hidden": false, "weight": 1 },
+          { "id": "s2", "args": [[[1]]], "expected": [[1]], "is_hidden": false, "weight": 1 },
+          { "id": "h1", "args": [[[1, 2], [3, 4]]], "expected": [[1, 3], [2, 4]], "is_hidden": true, "weight": 1 },
+          { "id": "h2", "args": [[[1, 2], [3, 4], [5, 6]]], "expected": [[1, 3, 5], [2, 4, 6]], "is_hidden": true, "weight": 1 }
+        ],
+        "time_limit_ms": 5000,
+        "memory_limit_kb": 256000,
+        "show_case_results": "visible_only"
+      }
+    }
+  ]
+}
