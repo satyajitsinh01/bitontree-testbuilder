@@ -46,6 +46,13 @@ export default function AssessmentsPage() {
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  const [windowStart, setWindowStart] = useState("");
+  const [windowEnd, setWindowEnd] = useState("");
+  const windowValid =
+    Boolean(windowStart && windowEnd) &&
+    new Date(windowEnd).getTime() > new Date(windowStart).getTime() &&
+    new Date(windowEnd).getTime() > Date.now() &&
+    (new Date(windowEnd).getTime() - new Date(windowStart).getTime()) % 60000 === 0;
 
   const { data, isLoading } = useQuery({
     queryKey: ["assessments"],
@@ -57,13 +64,20 @@ export default function AssessmentsPage() {
     mutationFn: () =>
       api<{ id: string }>("/assessments", {
         token: "admin",
-        body: { title, description },
+        body: {
+          title,
+          description,
+          window_start_at: new Date(windowStart).toISOString(),
+          window_end_at: new Date(windowEnd).toISOString(),
+        },
       }),
     onSuccess: () => {
       toast.success("Assessment created");
       setOpen(false);
       setTitle("");
       setDescription("");
+      setWindowStart("");
+      setWindowEnd("");
       queryClient.invalidateQueries({ queryKey: ["assessments"] });
     },
     onError: (error) => toast.error(errorText(error)),
@@ -99,9 +113,32 @@ export default function AssessmentsPage() {
                   onChange={(e) => setDescription(e.target.value)}
                 />
               </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="window-start">Start time</Label>
+                  <Input
+                    id="window-start"
+                    type="datetime-local"
+                    value={windowStart}
+                    onChange={(event) => setWindowStart(event.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="window-end">End time</Label>
+                  <Input
+                    id="window-end"
+                    type="datetime-local"
+                    value={windowEnd}
+                    onChange={(event) => setWindowEnd(event.target.value)}
+                  />
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Section durations must add up to this complete assessment window.
+              </p>
               <Button
                 onClick={() => create.mutate()}
-                disabled={title.trim().length < 3 || create.isPending}
+                disabled={title.trim().length < 3 || !windowValid || create.isPending}
                 className="w-full"
               >
                 Create

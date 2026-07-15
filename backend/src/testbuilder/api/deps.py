@@ -34,11 +34,13 @@ def _client_meta(request: Request) -> tuple[str | None, str | None]:
     return rid, ip
 
 
-async def _payload_or_401(creds: HTTPAuthorizationCredentials | None) -> dict:
+async def _payload_or_401(
+    creds: HTTPAuthorizationCredentials | None, *, leeway_seconds: int = 0
+) -> dict:
     if creds is None:
         raise HTTPException(401, "unauthenticated")
     try:
-        return decode_token(creds.credentials)
+        return decode_token(creds.credentials, leeway_seconds=leeway_seconds)
     except Exception:
         raise HTTPException(401, "invalid_token") from None
 
@@ -91,4 +93,20 @@ async def get_candidate(
         raise HTTPException(401, "unauthenticated")
     if assignment.window_end_at < now_utc():
         raise HTTPException(401, "credentials_expired")
+    return CandidateContext(assignment=assignment, org_id=assignment.org_id)
+
+
+async def get_candidate_for_state(
+    creds: HTTPAuthorizationCredentials | None = Depends(bearer),
+    db: AsyncSession = Depends(get_db),
+) -> CandidateContext:
+    """Allow a short post-window grace only to finalize and render submitted state."""
+    payload = await _payload_or_401(creds, leeway_seconds=300)
+    if payload.get("typ") != "assignment":
+        raise HTTPException(403, "forbidden_role")
+    assignment = (
+        await db.execute(select(TestAssignment).where(TestAssignment.id == payload["sub"]))
+    ).scalar_one_or_none()
+    if assignment is None or assignment.status == "removed":
+        raise HTTPException(401, "unauthenticated")
     return CandidateContext(assignment=assignment, org_id=assignment.org_id)

@@ -161,13 +161,26 @@ async def create_question(client, headers, qtype="mcq", title="What is 2+2?", **
 
 
 async def build_published_assessment(
-    client, admin, *, with_coding=True, with_text=True, section_minutes=(10, 10)
+    client,
+    admin,
+    *,
+    with_coding=True,
+    with_text=True,
+    section_minutes=(10, 10),
+    window_start_delta=timedelta(seconds=-1),
 ) -> dict:
     """Two-section assessment: MCQ section (3 questions, pool 2-of-3) and a final
     section with text + optional coding."""
+    window_start = now() + window_start_delta
+    window_end = window_start + timedelta(minutes=sum(section_minutes))
     response = await client.post(
         "/api/v1/assessments",
-        json={"title": "Backend Screening", "description": "spec test"},
+        json={
+            "title": "Backend Screening",
+            "description": "spec test",
+            "window_start_at": window_start.isoformat(),
+            "window_end_at": window_end.isoformat(),
+        },
         headers=admin["headers"],
     )
     assert response.status_code == 201, response.text

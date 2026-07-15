@@ -1,4 +1,4 @@
-import { ApiError, errorText } from "../api";
+import { api, ApiError, errorText, setRefreshToken, setToken } from "../api";
 
 describe("errorText", () => {
   it("renders the message for a simple ApiError", () => {
@@ -26,5 +26,46 @@ describe("errorText", () => {
   it("falls back for plain errors", () => {
     expect(errorText(new Error("boom"))).toBe("boom");
     expect(errorText("weird")).toBe("weird");
+  });
+});
+
+describe("candidate token refresh", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    jest.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    delete (global as { fetch?: typeof fetch }).fetch;
+  });
+
+  it("rotates an expired candidate token and retries the request", async () => {
+    setToken("candidate", "expired-access");
+    setRefreshToken("candidate", "refresh-one");
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValueOnce({ status: 401 } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          data: { access_token: "fresh-access", refresh_token: "refresh-two" },
+        }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: { get: () => "application/json" },
+        json: async () => ({ data: { status: "auto_submitted" }, error: null }),
+      } as unknown as Response);
+    (global as { fetch?: typeof fetch }).fetch = fetchMock;
+
+    const result = await api<{ status: string }>("/exam/state", {
+      token: "candidate",
+    });
+
+    expect(result.status).toBe("auto_submitted");
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(window.localStorage.getItem("tb_candidate_token")).toBe("fresh-access");
+    expect(window.localStorage.getItem("tb_candidate_refresh_token")).toBe("refresh-two");
   });
 });

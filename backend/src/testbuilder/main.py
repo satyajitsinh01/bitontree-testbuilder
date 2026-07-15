@@ -73,6 +73,7 @@ def create_app() -> FastAPI:
         proctoring,
         questions,
         reports,
+        timer_ws,
     )
 
     prefix = "/api/v1"
@@ -90,6 +91,7 @@ def create_app() -> FastAPI:
     app.include_router(proctoring.router, prefix=prefix)
     app.include_router(evaluations.router, prefix=prefix)
     app.include_router(reports.router, prefix=prefix)
+    app.include_router(timer_ws.router, prefix=prefix)
     return app
 
 

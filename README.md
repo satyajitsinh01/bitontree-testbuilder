@@ -127,6 +127,28 @@ the UI (or `GET /api/v1/questions/import-template`). Shape:
 
 Invalid entries are reported per index with the reason; valid ones import anyway.
 
+## Candidate CSV import format
+
+Admins can bulk-import candidate details from the assessment's **Candidates** tab.
+Use these exact column names and save the file as UTF-8 CSV:
+
+```csv
+studentId,name,email,phone,cgpa
+STU-1001,Jane Doe,jane@example.com,+919876543210,8.75
+STU-1002,Rahul Sharma,rahul@example.com,9876543210,9.10
+```
+
+`studentId`, `name`, `email`, and `cgpa` are required. CGPA must be between 0 and
+10. `phone` is optional; when provided, use a 10-digit Indian mobile number with
+an optional `+91` prefix. Test windows are not included in individual CSV rows;
+every imported or manually added candidate inherits the assessment's fixed start
+and end time.
+
+Assessment start and end times are set when the assessment is created. Section
+durations must add up to that exact window: for example, an assessment from 12:00
+to 13:00 requires exactly 60 total section minutes. The backend prevents section
+creation above the limit and prevents publishing when the total is below it.
+
 ## Tests
 
 ```bash

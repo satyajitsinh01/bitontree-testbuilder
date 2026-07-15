@@ -84,16 +84,22 @@ async def test_resend_regenerates_credentials(client, admin):
     assert login.status_code == 401
 
 
-async def test_reschedule_and_remove(client, admin):
+async def test_edit_remove_and_readd_candidate(client, admin):
     assessment = await build_published_assessment(client, admin, with_coding=False)
     assignment = await add_candidate(client, admin, assessment["id"], email="m@x.com")
-    new_end = (now() + timedelta(hours=6)).isoformat()
     patched = await client.patch(
         f"/api/v1/assignments/{assignment['id']}",
-        json={"window_end_at": new_end},
+        json={
+            "full_name": "Updated Candidate",
+            "phone": "+919888888888",
+            "student_id": "UPDATED-1",
+            "cgpa": 9.25,
+        },
         headers=admin["headers"],
     )
     assert patched.status_code == 200
+    assert patched.json()["data"]["candidate"]["full_name"] == "Updated Candidate"
+    assert patched.json()["data"]["candidate"]["cgpa"] == 9.25
 
     removed = await client.delete(
         f"/api/v1/assignments/{assignment['id']}", headers=admin["headers"]
@@ -107,16 +113,19 @@ async def test_reschedule_and_remove(client, admin):
     )
     assert login.status_code == 401
 
+    restored = await add_candidate(client, admin, assessment["id"], email="m@x.com")
+    assert restored["id"] == assignment["id"]
+    assert restored["window_start_at"] == assessment["window_start_at"]
+    assert restored["window_end_at"] == assessment["window_end_at"]
+
 
 def _csv_bytes() -> bytes:
-    start = (now() + timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
-    end = (now() + timedelta(hours=5)).strftime("%Y-%m-%d %H:%M")
     rows = [
-        "name,email,phone,start_at,end_at",
-        f"Alice A,alice@x.com,+919111111111,{start},{end}",
-        f"Bob B,not-an-email,+919222222222,{start},{end}",  # invalid email
-        f"Cara C,cara@x.com,+919333333333,{start},{end}",
-        f"Dupe D,alice@x.com,+919444444444,{start},{end}",  # duplicate in file
+        "studentId,name,email,phone,cgpa",
+        "STU-1,Alice A,alice@x.com,+919111111111,8.5",
+        "STU-2,Bob B,not-an-email,+919222222222,7.2",  # invalid email
+        "STU-3,Cara C,cara@x.com,+919333333333,9.1",
+        "STU-4,Dupe D,alice@x.com,+919444444444,6.8",  # duplicate email in file
     ]
     return "\n".join(rows).encode()
 
@@ -124,8 +133,11 @@ def _csv_bytes() -> bytes:
 async def test_bulk_import_partial_success_with_error_report(client, admin):
     """FR-012/013: valid rows import; invalid rows come back with row numbers."""
     assessment = await build_published_assessment(client, admin, with_coding=False)
+    start = (now() + timedelta(hours=1)).isoformat()
+    end = (now() + timedelta(hours=5)).isoformat()
     response = await client.post(
-        f"/api/v1/assessments/{assessment['id']}/assignments/import",
+        f"/api/v1/assessments/{assessment['id']}/assignments/import"
+        f"?window_start_at={start}&window_end_at={end}",
         files={"file": ("candidates.csv", io.BytesIO(_csv_bytes()), "text/csv")},
         headers=admin["headers"],
     )
@@ -147,9 +159,15 @@ async def test_bulk_import_partial_success_with_error_report(client, admin):
         f"/api/v1/assessments/{assessment['id']}/assignments", headers=admin["headers"]
     )
     assert listing.json()["data"]["total"] == 2
+    candidates = {
+        item["candidate"]["email"]: item["candidate"]
+        for item in listing.json()["data"]["items"]
+    }
+    assert candidates["alice@x.com"]["student_id"] == "STU-1"
+    assert candidates["cara@x.com"]["cgpa"] == 9.1
 
 
 async def test_import_template_downloadable(client, admin):
     response = await client.get("/api/v1/import-batches/template", headers=admin["headers"])
     assert response.status_code == 200
-    assert response.text.startswith("name,email,phone,start_at,end_at")
+    assert response.text.startswith("studentId,name,email,phone,cgpa")

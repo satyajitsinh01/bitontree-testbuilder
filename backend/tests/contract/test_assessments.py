@@ -5,13 +5,25 @@ from tests.conftest import (
     build_published_assessment,
     candidate_login,
     create_question,
+    now,
 )
+
+
+def _assessment_body(title: str, minutes: int = 10) -> dict:
+    from datetime import timedelta
+
+    start = now() - timedelta(minutes=1)
+    return {
+        "title": title,
+        "window_start_at": start.isoformat(),
+        "window_end_at": (start + timedelta(minutes=minutes)).isoformat(),
+    }
 
 
 async def test_publish_requires_weightage_100(client, admin):
     assessment = (
         await client.post(
-            "/api/v1/assessments", json={"title": "Broken weights"},
+            "/api/v1/assessments", json=_assessment_body("Broken weights"),
             headers=admin["headers"],
         )
     ).json()["data"]
@@ -36,11 +48,84 @@ async def test_publish_requires_weightage_100(client, admin):
     assert any("sum to 100" in d for d in response.json()["error"]["details"])
 
 
+async def test_section_creation_rejects_total_above_100(client, admin):
+    assessment = (
+        await client.post(
+            "/api/v1/assessments",
+            json=_assessment_body("Invalid section weights", 20),
+            headers=admin["headers"],
+        )
+    ).json()["data"]
+    first = await client.post(
+        f"/api/v1/assessments/{assessment['id']}/sections",
+        json={"name": "First", "duration_min": 10, "weightage_pct": 60},
+        headers=admin["headers"],
+    )
+    assert first.status_code == 201
+
+    response = await client.post(
+        f"/api/v1/assessments/{assessment['id']}/sections",
+        json={"name": "Second", "duration_min": 10, "weightage_pct": 40.01},
+        headers=admin["headers"],
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "section_weightage_exceeded"
+
+
+async def test_section_creation_rejects_duration_above_fixed_window(client, admin):
+    assessment = (
+        await client.post(
+            "/api/v1/assessments",
+            json=_assessment_body("Fixed sixty minute window", 60),
+            headers=admin["headers"],
+        )
+    ).json()["data"]
+    first = await client.post(
+        f"/api/v1/assessments/{assessment['id']}/sections",
+        json={"name": "First", "duration_min": 40, "weightage_pct": 50},
+        headers=admin["headers"],
+    )
+    assert first.status_code == 201
+
+    response = await client.post(
+        f"/api/v1/assessments/{assessment['id']}/sections",
+        json={"name": "Too long", "duration_min": 21, "weightage_pct": 50},
+        headers=admin["headers"],
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "section_duration_exceeded"
+
+
+async def test_publish_rejects_weightage_that_is_not_exactly_100(client, admin):
+    assessment = (
+        await client.post(
+            "/api/v1/assessments",
+            json=_assessment_body("Almost complete weights"),
+            headers=admin["headers"],
+        )
+    ).json()["data"]
+    await client.post(
+        f"/api/v1/assessments/{assessment['id']}/sections",
+        json={"name": "Only", "duration_min": 10, "weightage_pct": 99.99},
+        headers=admin["headers"],
+    )
+
+    response = await client.post(
+        f"/api/v1/assessments/{assessment['id']}/publish",
+        headers=admin["headers"],
+    )
+
+    assert response.status_code == 422
+    assert any("currently 99.99" in d for d in response.json()["error"]["details"])
+
+
 async def test_publish_requires_pool_coverage(client, admin):
     """FR-038: 'pick 10 of N' must have N >= 10 active questions."""
     assessment = (
         await client.post(
-            "/api/v1/assessments", json={"title": "Thin pool"}, headers=admin["headers"]
+            "/api/v1/assessments", json=_assessment_body("Thin pool"), headers=admin["headers"]
         )
     ).json()["data"]
     question = await create_question(client, admin["headers"], "mcq", "Pool question one")

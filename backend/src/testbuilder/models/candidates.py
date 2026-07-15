@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..db import Base
@@ -25,6 +25,8 @@ class Candidate(Base, TimestampMixin):
     full_name: Mapped[str] = mapped_column(String(200))
     email: Mapped[str] = mapped_column(String(320))  # stored lowercase
     phone: Mapped[str] = mapped_column(String(30), default="")
+    student_id: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    cgpa: Mapped[float | None] = mapped_column(Float, nullable=True)
 
 
 class TestAssignment(Base, TimestampMixin):

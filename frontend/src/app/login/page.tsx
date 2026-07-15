@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
-import { api, ApiError, setToken } from "@/lib/api";
+import { api, ApiError, setRefreshToken, setToken } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -14,6 +14,7 @@ import { CheckCircle2, ClipboardList, Clock, MonitorX, XCircle } from "lucide-re
 interface UnifiedLoginOut {
   kind: "admin" | "candidate";
   access_token: string;
+  refresh_token?: string;
   user?: { id: string; email: string; full_name: string };
   roles?: string[];
   assignment_summary?: {
@@ -54,6 +55,7 @@ export default function LoginPage() {
         router.push("/admin");
       } else {
         setToken("candidate", data.access_token);
+        setRefreshToken("candidate", data.refresh_token ?? null);
         window.localStorage.setItem(
           "tb_candidate_summary",
           JSON.stringify(data.assignment_summary ?? {})

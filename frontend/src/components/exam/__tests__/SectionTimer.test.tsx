@@ -1,53 +1,63 @@
 import { act, render, screen } from "@testing-library/react";
 import { SectionTimer } from "../SectionTimer";
 
-describe("SectionTimer (UT-M6-02)", () => {
-  beforeEach(() => jest.useFakeTimers());
-  afterEach(() => jest.useRealTimers());
+class FakeWebSocket {
+  static instance: FakeWebSocket;
+  onmessage: ((event: { data: string }) => void) | null = null;
+  onclose: ((event: { code: number }) => void) | null = null;
 
-  function iso(date: Date): string {
-    return date.toISOString().replace("Z", "");
+  constructor(public url: string) {
+    FakeWebSocket.instance = this;
   }
 
-  it("renders remaining time from the server deadline, not local assumptions", () => {
-    const now = new Date();
-    const deadline = new Date(now.getTime() + 5 * 60 * 1000);
-    render(
-      <SectionTimer deadlineAt={iso(deadline)} serverNow={iso(now)} onExpire={() => {}} />
-    );
-    expect(screen.getByTestId("section-timer")).toHaveTextContent(/0[45]:\d\d/);
+  close() {}
+
+  sendMessage(message: object) {
+    this.onmessage?.({ data: JSON.stringify(message) });
+  }
+}
+
+describe("SectionTimer server WebSocket", () => {
+  beforeEach(() => {
+    window.localStorage.setItem("tb_candidate_token", "candidate-token");
+    global.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
   });
 
-  it("corrects for client clock drift using server_now", () => {
-    const now = new Date();
-    // server says it is 10 minutes EARLIER than the local clock
-    const serverNow = new Date(now.getTime() - 10 * 60 * 1000);
-    const deadline = new Date(serverNow.getTime() + 3 * 60 * 1000);
+  it("renders only the remaining time pushed by the server", () => {
+    render(
+      <SectionTimer sessionId="session-1" sectionId="section-1" onStateChange={() => {}} />
+    );
+    expect(screen.getByTestId("section-timer")).toHaveTextContent("--:--");
+
+    act(() => {
+      FakeWebSocket.instance.sendMessage({
+        status: "active",
+        current_section_id: "section-1",
+        remaining_seconds: 125,
+      });
+    });
+
+    expect(screen.getByTestId("section-timer")).toHaveTextContent("02:05");
+  });
+
+  it("refreshes exam state when the server advances or submits", () => {
+    const onStateChange = jest.fn();
     render(
       <SectionTimer
-        deadlineAt={iso(deadline)}
-        serverNow={iso(serverNow)}
-        onExpire={() => {}}
+        sessionId="session-1"
+        sectionId="section-1"
+        onStateChange={onStateChange}
       />
     );
-    // without drift correction this would show 00:00 (deadline already past locally)
-    expect(screen.getByTestId("section-timer")).toHaveTextContent(/0[23]:\d\d/);
-  });
 
-  it("fires onExpire exactly once when the countdown reaches zero", () => {
-    const onExpire = jest.fn();
-    const now = new Date();
-    const deadline = new Date(now.getTime() - 1000); // already past on first tick
-    render(
-      <SectionTimer deadlineAt={iso(deadline)} serverNow={iso(now)} onExpire={onExpire} />
-    );
     act(() => {
-      jest.advanceTimersByTime(1100);
+      FakeWebSocket.instance.sendMessage({
+        status: "active",
+        current_section_id: "section-2",
+        remaining_seconds: 600,
+      });
     });
-    expect(onExpire).toHaveBeenCalledTimes(1);
-    act(() => {
-      jest.advanceTimersByTime(5000); // interval cleared — no repeat firing
-    });
-    expect(onExpire).toHaveBeenCalledTimes(1);
+
+    expect(onStateChange).toHaveBeenCalledTimes(1);
   });
 });
