@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useRef } from "react";
 import type { RefObject } from "react";
-import { api } from "@/lib/api";
+import { api, getToken } from "@/lib/api";
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 type EventKind =
   | "tab_switch"
@@ -23,7 +25,7 @@ interface ProctorEvent {
   detail?: Record<string, unknown>;
 }
 
-const FLUSH_INTERVAL_MS = 4000;
+const FLUSH_INTERVAL_MS = 2000;
 const SCREENSHOT_INTERVAL_MS = 5000;
 const VIOLATION_CAPTURE_THROTTLE_MS = 1500;
 const DEVTOOLS_POLL_MS = 2000;
@@ -69,6 +71,25 @@ export function useProctorGuard(
   const webcamVideo = useRef<HTMLVideoElement | null>(null);
   const screenVideo = useRef<HTMLVideoElement | null>(null);
   const lastViolationCapture = useRef(0);
+
+  // Flush queued events with keepalive so the batch still lands when the exam
+  // submits or the page unmounts/navigates — otherwise late red flags are lost.
+  const flushEvents = useCallback((keepalive = false) => {
+    if (queue.current.length === 0) return;
+    const batch = queue.current.splice(0, queue.current.length);
+    const token = getToken("candidate");
+    fetch(`${API_BASE}/api/v1/exam/proctoring/events`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ events: batch }),
+      keepalive,
+    }).catch(() => {
+      queue.current.unshift(...batch); // retry on next tick
+    });
+  }, []);
 
   const captureViolationScreenshot = useCallback(async () => {
     const source = screenVideo.current;
@@ -221,18 +242,12 @@ export function useProctorGuard(
       }
     }, DEVTOOLS_POLL_MS);
 
-    const flusher = setInterval(async () => {
-      if (queue.current.length === 0) return;
-      const batch = queue.current.splice(0, queue.current.length);
-      try {
-        await api("/exam/proctoring/events", {
-          token: "candidate",
-          body: { events: batch },
-        });
-      } catch {
-        queue.current.unshift(...batch);
-      }
-    }, FLUSH_INTERVAL_MS);
+    const flusher = setInterval(() => flushEvents(false), FLUSH_INTERVAL_MS);
+    // flush immediately when the tab is hidden or the page is being torn down
+    const onPageHide = () => flushEvents(true);
+    document.addEventListener("visibilitychange", onPageHide);
+    window.addEventListener("pagehide", onPageHide);
+    window.addEventListener("beforeunload", onPageHide);
 
     // periodic webcam snapshots (kind "screenshot" -> .../webcam)
     let screenshotTimer: ReturnType<typeof setInterval> | null = null;
@@ -282,12 +297,16 @@ export function useProctorGuard(
       window.removeEventListener("keydown", onKeyDown, true);
       window.removeEventListener("keyup", onKeyUp, true);
       window.removeEventListener("resize", onResize);
+      document.removeEventListener("visibilitychange", onPageHide);
+      window.removeEventListener("pagehide", onPageHide);
+      window.removeEventListener("beforeunload", onPageHide);
       clearInterval(devtoolsPoll);
       clearInterval(flusher);
       if (resizeTimer) clearTimeout(resizeTimer);
       if (screenshotTimer) clearInterval(screenshotTimer);
+      flushEvents(true); // final flush of any pending red flags before teardown
       webcamStream.current?.getTracks().forEach((track) => track.stop());
       screenVideo.current = null;
     };
-  }, [active, push, onWarning, screenStreamRef]);
+  }, [active, push, onWarning, screenStreamRef, flushEvents]);
 }

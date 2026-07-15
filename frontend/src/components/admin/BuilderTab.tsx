@@ -271,8 +271,21 @@ function SectionQuestionsDialog({
   onChanged: () => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [poolCount, setPoolCount] = useState(0);
+  // pre-select the questions already saved on this section (survives hard refresh
+  // and switching between assessments)
+  const savedIds = section.questions.map((q) => q.question_id);
+  const savedPoolCount = section.pool_rules[0]?.select_count ?? 0;
+  const [selected, setSelected] = useState<Set<string>>(new Set(savedIds));
+  const [poolCount, setPoolCount] = useState(savedPoolCount);
+
+  // when the dialog opens, resync from the latest saved section data
+  function onOpenChange(next: boolean) {
+    if (next) {
+      setSelected(new Set(section.questions.map((q) => q.question_id)));
+      setPoolCount(section.pool_rules[0]?.select_count ?? 0);
+    }
+    setOpen(next);
+  }
 
   const { data: bank } = useQuery({
     queryKey: ["questions", "active-picker"],
@@ -318,7 +331,7 @@ function SectionQuestionsDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogTrigger render={<Button size="sm" variant="outline" />}>
         Pick questions ({section.questions.length})
       </DialogTrigger>

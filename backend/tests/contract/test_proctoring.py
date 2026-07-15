@@ -66,14 +66,52 @@ async def test_event_batch_ingest_and_timeline(client, admin):
     assert len(data["red_flags"]) == 2 and len(data["warnings"]) == 1
 
 
-async def test_invalid_event_kind_422(client, admin):
-    _, headers, _ = await _live_session(client, admin)
+async def test_unknown_event_kind_skipped_not_batch_failure(client, admin):
+    """One unknown kind must NOT drop the real red flags flushed alongside it —
+    unknowns are skipped, valid events still persist."""
+    _, headers, state = await _live_session(client, admin)
     response = await client.post(
         "/api/v1/exam/proctoring/events",
-        json={"events": [{"kind": "made_up_kind"}]},
+        json={
+            "events": [
+                {"kind": "made_up_kind"},
+                {"kind": "tab_switch"},
+                {"kind": "devtools_open"},
+            ]
+        },
         headers=headers,
     )
-    assert response.status_code == 422
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["accepted"] == 2
+    assert data["skipped"] == ["made_up_kind"]
+
+    flags = await client.get(
+        f"/api/v1/sessions/{state['session_id']}/proctoring/flags",
+        headers=admin["headers"],
+    )
+    red_kinds = {f["kind"] for f in flags.json()["data"]["red_flags"]}
+    assert {"tab_switch", "devtools_open"} <= red_kinds
+
+
+async def test_events_persist_after_submit(client, admin):
+    """A proctoring batch flushed just after submission still records against the
+    session (final-flush safety net)."""
+    _, headers, state = await _live_session(client, admin)
+    await client.post("/api/v1/exam/submit", json={"confirm": True}, headers=headers)
+    late = await client.post(
+        "/api/v1/exam/proctoring/events",
+        json={"events": [{"kind": "screen_share_stopped"}]},
+        headers=headers,
+    )
+    assert late.status_code == 200
+    assert late.json()["data"]["accepted"] == 1
+    flags = await client.get(
+        f"/api/v1/sessions/{state['session_id']}/proctoring/flags",
+        headers=admin["headers"],
+    )
+    assert any(f["kind"] == "screen_share_stopped"
+               for f in flags.json()["data"]["red_flags"])
 
 
 async def test_lenient_policy_downgrades_severity(client, admin):

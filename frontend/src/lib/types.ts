@@ -54,7 +54,12 @@ export interface SectionOut {
   weightage_pct: number;
   question_count: number;
   is_final: boolean;
-  questions: { question_version_id: string; pool_group: string | null; points: number }[];
+  questions: {
+    question_id: string;
+    question_version_id: string;
+    pool_group: string | null;
+    points: number;
+  }[];
   pool_rules: { pool_group: string; select_count: number }[];
 }
 

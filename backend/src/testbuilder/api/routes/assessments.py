@@ -3,7 +3,7 @@ from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...db import get_db
@@ -11,9 +11,11 @@ from ...models import (
     Assessment,
     AssessmentVersion,
     Question,
+    QuestionVersion,
     Section,
     SectionPoolRule,
     SectionQuestion,
+    TestAssignment,
 )
 from ...models.base import now_utc
 from ...services.audit import write_audit
@@ -26,6 +28,7 @@ from ...services.versioning import (
 from ..deps import AdminContext, require_roles
 
 router = APIRouter(prefix="/assessments", tags=["assessments"])
+ASSESSMENT_ADMIN_ROLES = ("test_creator", "hr_admin", "evaluator")
 
 
 class AssessmentIn(BaseModel):
@@ -87,7 +90,7 @@ async def _validate_section_weight_total(
 
 
 def _naive(value: datetime) -> datetime:
-    return value.replace(tzinfo=None) if value.tzinfo else value
+    return value.replace(tzinfo=None, second=0, microsecond=0)
 
 
 def _assessment_duration_minutes(assessment: Assessment) -> int:
@@ -139,15 +142,18 @@ async def _sections_out(db: AsyncSession, version: AssessmentVersion) -> list[di
     )
     out = []
     for section in sections:
+        # include the owning question_id so the UI can pre-select saved picks even
+        # after the question is versioned (matches by question, not just version)
         picks = (
-            (
-                await db.execute(
-                    select(SectionQuestion).where(SectionQuestion.section_id == section.id)
+            await db.execute(
+                select(SectionQuestion, QuestionVersion.question_id)
+                .join(
+                    QuestionVersion,
+                    QuestionVersion.id == SectionQuestion.question_version_id,
                 )
+                .where(SectionQuestion.section_id == section.id)
             )
-            .scalars()
-            .all()
-        )
+        ).all()
         rules = (
             (
                 await db.execute(
@@ -170,11 +176,12 @@ async def _sections_out(db: AsyncSession, version: AssessmentVersion) -> list[di
                 "is_final": section.is_final,
                 "questions": [
                     {
+                        "question_id": question_id,
                         "question_version_id": p.question_version_id,
                         "pool_group": p.pool_group,
                         "points": p.points,
                     }
-                    for p in picks
+                    for p, question_id in picks
                 ],
                 "pool_rules": [
                     {"pool_group": r.pool_group, "select_count": r.select_count}
@@ -235,7 +242,16 @@ async def list_assessments(
         .all()
     )
     items = [
-        {"id": a.id, "title": a.title, "status": a.status, "created_at": a.created_at.isoformat()}
+        {
+            "id": a.id,
+            "title": a.title,
+            "description": a.description,
+            "window_start_at": a.window_start_at.isoformat() if a.window_start_at else None,
+            "window_end_at": a.window_end_at.isoformat() if a.window_end_at else None,
+            "status": a.status,
+            "settings": a.settings,
+            "created_at": a.created_at.isoformat(),
+        }
         for a in rows
     ]
     return {"data": {"items": items, "total": total, "page": page, "size": size}, "error": None}
@@ -244,7 +260,7 @@ async def list_assessments(
 @router.post("", status_code=201)
 async def create_assessment(
     body: AssessmentIn,
-    ctx: AdminContext = Depends(require_roles("test_creator", "hr_admin")),
+    ctx: AdminContext = Depends(require_roles(*ASSESSMENT_ADMIN_ROLES)),
     db: AsyncSession = Depends(get_db),
 ):
     assessment = Assessment(
@@ -287,8 +303,10 @@ async def get_assessment(
 
 
 class AssessmentPatch(BaseModel):
-    title: str | None = None
+    title: str | None = Field(default=None, min_length=3, max_length=300)
     description: str | None = None
+    window_start_at: datetime | None = None
+    window_end_at: datetime | None = None
     settings: dict | None = None
 
 
@@ -296,7 +314,7 @@ class AssessmentPatch(BaseModel):
 async def patch_assessment(
     assessment_id: str,
     body: AssessmentPatch,
-    ctx: AdminContext = Depends(require_roles("test_creator", "hr_admin")),
+    ctx: AdminContext = Depends(require_roles(*ASSESSMENT_ADMIN_ROLES)),
     db: AsyncSession = Depends(get_db),
 ):
     assessment = await _get_assessment(db, ctx.org_id, assessment_id)
@@ -305,8 +323,15 @@ async def patch_assessment(
         assessment.title = body.title
     if body.description is not None:
         assessment.description = body.description
+    if body.window_start_at is not None:
+        assessment.window_start_at = _naive(body.window_start_at)
+    if body.window_end_at is not None:
+        assessment.window_end_at = _naive(body.window_end_at)
     if body.settings is not None:
         assessment.settings = {**assessment.settings, **body.settings}
+    if body.window_start_at is not None or body.window_end_at is not None:
+        _assessment_duration_minutes(assessment)
+        await _validate_section_duration_total(db, assessment, version.id, 0)
     await write_audit(
         db,
         org_id=ctx.org_id,
@@ -315,7 +340,7 @@ async def patch_assessment(
         action="assessment.updated",
         entity_type="assessment",
         entity_id=assessment.id,
-        after=body.model_dump(exclude_none=True) | {"version": version.version},
+        after=body.model_dump(exclude_none=True, mode="json") | {"version": version.version},
         request_id=ctx.request_id,
         ip=ctx.ip,
     )
@@ -323,11 +348,74 @@ async def patch_assessment(
     return {"data": await _assessment_out(db, assessment), "error": None}
 
 
+@router.delete("/{assessment_id}", status_code=204)
+async def delete_assessment(
+    assessment_id: str,
+    ctx: AdminContext = Depends(require_roles(*ASSESSMENT_ADMIN_ROLES)),
+    db: AsyncSession = Depends(get_db),
+):
+    assessment = await _get_assessment(db, ctx.org_id, assessment_id)
+    assignment_count = (
+        await db.execute(
+            select(func.count()).select_from(TestAssignment).where(
+                TestAssignment.assessment_id == assessment.id
+            )
+        )
+    ).scalar_one()
+    if assignment_count:
+        raise HTTPException(
+            409,
+            {
+                "code": "assessment_has_candidates",
+                "message": "Remove assigned candidates before deleting this assessment.",
+            },
+        )
+
+    version_ids = (
+        await db.execute(
+            select(AssessmentVersion.id).where(
+                AssessmentVersion.assessment_id == assessment.id
+            )
+        )
+    ).scalars().all()
+    if version_ids:
+        section_ids = (
+            await db.execute(
+                select(Section.id).where(Section.assessment_version_id.in_(version_ids))
+            )
+        ).scalars().all()
+        if section_ids:
+            await db.execute(
+                delete(SectionQuestion).where(SectionQuestion.section_id.in_(section_ids))
+            )
+            await db.execute(
+                delete(SectionPoolRule).where(SectionPoolRule.section_id.in_(section_ids))
+            )
+            await db.execute(delete(Section).where(Section.id.in_(section_ids)))
+        await db.execute(
+            delete(AssessmentVersion).where(AssessmentVersion.id.in_(version_ids))
+        )
+    await db.delete(assessment)
+    await write_audit(
+        db,
+        org_id=ctx.org_id,
+        actor_type="user",
+        actor_id=ctx.user.id,
+        action="assessment.deleted",
+        entity_type="assessment",
+        entity_id=assessment.id,
+        before={"title": assessment.title},
+        request_id=ctx.request_id,
+        ip=ctx.ip,
+    )
+    await db.commit()
+
+
 @router.post("/{assessment_id}/sections", status_code=201)
 async def add_section(
     assessment_id: str,
     body: SectionIn,
-    ctx: AdminContext = Depends(require_roles("test_creator")),
+    ctx: AdminContext = Depends(require_roles(*ASSESSMENT_ADMIN_ROLES)),
     db: AsyncSession = Depends(get_db),
 ):
     assessment = await _get_assessment(db, ctx.org_id, assessment_id)
@@ -352,7 +440,7 @@ async def add_section(
 @router.get("/{assessment_id}/versions")
 async def list_versions(
     assessment_id: str,
-    ctx: AdminContext = Depends(require_roles("test_creator", "hr_admin")),
+    ctx: AdminContext = Depends(require_roles(*ASSESSMENT_ADMIN_ROLES)),
     db: AsyncSession = Depends(get_db),
 ):
     assessment = await _get_assessment(db, ctx.org_id, assessment_id)
@@ -387,7 +475,7 @@ async def list_versions(
 @router.post("/{assessment_id}/publish")
 async def publish_assessment(
     assessment_id: str,
-    ctx: AdminContext = Depends(require_roles("test_creator")),
+    ctx: AdminContext = Depends(require_roles(*ASSESSMENT_ADMIN_ROLES)),
     db: AsyncSession = Depends(get_db),
 ):
     assessment = await _get_assessment(db, ctx.org_id, assessment_id)
@@ -441,7 +529,7 @@ async def _get_section_ctx(
 async def patch_section(
     section_id: str,
     body: SectionIn,
-    ctx: AdminContext = Depends(require_roles("test_creator")),
+    ctx: AdminContext = Depends(require_roles(*ASSESSMENT_ADMIN_ROLES)),
     db: AsyncSession = Depends(get_db),
 ):
     section, version, assessment = await _get_section_ctx(db, ctx.org_id, section_id)
@@ -475,7 +563,7 @@ async def patch_section(
 @section_router.delete("/{section_id}")
 async def delete_section(
     section_id: str,
-    ctx: AdminContext = Depends(require_roles("test_creator")),
+    ctx: AdminContext = Depends(require_roles(*ASSESSMENT_ADMIN_ROLES)),
     db: AsyncSession = Depends(get_db),
 ):
     section, version, _ = await _get_section_ctx(db, ctx.org_id, section_id)
@@ -502,7 +590,7 @@ class SectionQuestionsIn(BaseModel):
 async def set_section_questions(
     section_id: str,
     body: SectionQuestionsIn,
-    ctx: AdminContext = Depends(require_roles("test_creator")),
+    ctx: AdminContext = Depends(require_roles(*ASSESSMENT_ADMIN_ROLES)),
     db: AsyncSession = Depends(get_db),
 ):
     section, version, _ = await _get_section_ctx(db, ctx.org_id, section_id)
@@ -549,7 +637,7 @@ class PoolRulesIn(BaseModel):
 async def set_pool_rules(
     section_id: str,
     body: PoolRulesIn,
-    ctx: AdminContext = Depends(require_roles("test_creator")),
+    ctx: AdminContext = Depends(require_roles(*ASSESSMENT_ADMIN_ROLES)),
     db: AsyncSession = Depends(get_db),
 ):
     section, version, _ = await _get_section_ctx(db, ctx.org_id, section_id)

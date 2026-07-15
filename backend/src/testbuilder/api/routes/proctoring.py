@@ -73,13 +73,30 @@ def _clamp_occurred(occurred_at: datetime | None, received: datetime) -> datetim
     return occurred
 
 
+async def _resolve_ingest_session(db: AsyncSession, assignment_id: str) -> ExamSession | None:
+    """Prefer the active session, but fall back to the most recent one so a
+    proctoring batch flushed just after submission still records instead of being
+    dropped (a common source of 'missing' red flags)."""
+    session = await get_active_session(db, assignment_id)
+    if session is not None:
+        return session
+    return (
+        await db.execute(
+            select(ExamSession)
+            .where(ExamSession.assignment_id == assignment_id)
+            .order_by(ExamSession.created_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+
 @router.post("/exam/proctoring/events")
 async def ingest_events(
     body: EventsIn,
     ctx: CandidateContext = Depends(get_candidate),
     db: AsyncSession = Depends(get_db),
 ):
-    session = await get_active_session(db, ctx.assignment.id)
+    session = await _resolve_ingest_session(db, ctx.assignment.id)
     if session is None:
         raise HTTPException(409, "no_active_session")
     assessment = (
@@ -90,9 +107,13 @@ async def ingest_events(
     policy = (assessment.settings or {}).get("proctoring_policy", "standard")
     received = now_utc()
     accepted = 0
+    skipped: list[str] = []
     for event in body.events:
+        # Skip unknown kinds instead of failing the whole batch — one bad kind
+        # must never drop the real red flags flushed alongside it.
         if event.kind not in CLIENT_EVENT_KINDS:
-            raise HTTPException(422, {"code": "invalid_event_kind", "details": [event.kind]})
+            skipped.append(event.kind)
+            continue
         db.add(
             ProctoringEvent(
                 session_id=session.id,
@@ -105,7 +126,7 @@ async def ingest_events(
         )
         accepted += 1
     await db.commit()
-    return {"data": {"accepted": accepted}, "error": None}
+    return {"data": {"accepted": accepted, "skipped": skipped}, "error": None}
 
 
 class EvidenceIn(BaseModel):
@@ -121,7 +142,7 @@ async def ingest_evidence(
     ctx: CandidateContext = Depends(get_candidate),
     db: AsyncSession = Depends(get_db),
 ):
-    session = await get_active_session(db, ctx.assignment.id)
+    session = await _resolve_ingest_session(db, ctx.assignment.id)
     if session is None:
         raise HTTPException(409, "no_active_session")
     candidate = (
