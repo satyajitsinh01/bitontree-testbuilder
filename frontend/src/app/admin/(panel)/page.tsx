@@ -26,13 +26,22 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
-import { Plus } from "lucide-react";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { Plus, Trash2 } from "lucide-react";
 
 interface AssessmentRow {
   id: string;
   title: string;
+  description: string;
+  window_start_at: string | null;
+  window_end_at: string | null;
   status: string;
   created_at: string;
+}
+
+function formatServerDate(value: string | null): string {
+  if (!value) return "Not configured";
+  return new Date(value.endsWith("Z") ? value : `${value}Z`).toLocaleString();
 }
 
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "outline"> = {
@@ -78,6 +87,16 @@ export default function AssessmentsPage() {
       setDescription("");
       setWindowStart("");
       setWindowEnd("");
+      queryClient.invalidateQueries({ queryKey: ["assessments"] });
+    },
+    onError: (error) => toast.error(errorText(error)),
+  });
+
+  const remove = useMutation({
+    mutationFn: (id: string) =>
+      api(`/assessments/${id}`, { token: "admin", method: "DELETE" }),
+    onSuccess: () => {
+      toast.success("Assessment deleted");
       queryClient.invalidateQueries({ queryKey: ["assessments"] });
     },
     onError: (error) => toast.error(errorText(error)),
@@ -154,6 +173,7 @@ export default function AssessmentsPage() {
             <TableRow>
               <TableHead>Title</TableHead>
               <TableHead>Status</TableHead>
+              <TableHead>Assessment window</TableHead>
               <TableHead>Created</TableHead>
               <TableHead className="w-24" />
             </TableRow>
@@ -161,7 +181,7 @@ export default function AssessmentsPage() {
           <TableBody>
             {isLoading && (
               <TableRow>
-                <TableCell colSpan={4} className="text-center text-muted-foreground py-8">
+                <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
                   Loading…
                 </TableCell>
               </TableRow>
@@ -174,23 +194,48 @@ export default function AssessmentsPage() {
                     {row.status}
                   </Badge>
                 </TableCell>
+                <TableCell className="text-sm text-muted-foreground">
+                  <span className="block">{formatServerDate(row.window_start_at)}</span>
+                  <span className="block">to {formatServerDate(row.window_end_at)}</span>
+                </TableCell>
                 <TableCell className="text-muted-foreground">
                   {new Date(row.created_at).toLocaleString()}
                 </TableCell>
                 <TableCell>
-                  <Button
-                    render={<Link href={`/admin/assessments/${row.id}`} />}
-                    variant="outline"
-                    size="sm"
-                  >
-                    Open
-                  </Button>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      render={<Link href={`/admin/assessments/${row.id}`} />}
+                      variant="outline"
+                      size="sm"
+                    >
+                      Open
+                    </Button>
+                    <ConfirmDialog
+                      trigger={
+                        <Button size="icon" variant="ghost" title="Delete assessment">
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      }
+                      title="Delete this assessment?"
+                      description={
+                        <>
+                          <strong>{row.title}</strong> and all of its sections and
+                          versions will be permanently deleted.
+                        </>
+                      }
+                      warning="This cannot be undone. Assessments with assigned candidates must have those candidates removed first."
+                      confirmLabel="Delete assessment"
+                      onConfirm={async () => {
+                        await remove.mutateAsync(row.id);
+                      }}
+                    />
+                  </div>
                 </TableCell>
               </TableRow>
             ))}
             {data && data.items.length === 0 && (
               <TableRow>
-                <TableCell colSpan={4} className="text-center text-muted-foreground py-8">
+                <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
                   No assessments yet — create your first one.
                 </TableCell>
               </TableRow>

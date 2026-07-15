@@ -24,6 +24,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Mail, Pencil, Plus, RotateCcw, Trash2, Upload } from "lucide-react";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -136,10 +137,24 @@ function AddCandidateDialog({
         </DialogHeader>
         {credentials ? (
           <div className="space-y-3">
-            <p className="text-sm">
-              Credentials generated — shown once. The invitation email
-              {credentials.send_email ? " was sent." : " was NOT sent (toggle off)."}
-            </p>
+            <p className="text-sm">Credentials generated — shown once.</p>
+            {credentials.email_status === "sent" && (
+              <p className="rounded border bg-muted/40 px-3 py-2 text-sm">
+                ✓ Invitation email sent to {credentials.candidate.email}.
+              </p>
+            )}
+            {credentials.email_status === "failed" && (
+              <p className="rounded border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+                The invitation email could not be sent — check the mail configuration
+                (TB_SMTP_* / TB_RESEND_API_KEY). Use the credentials below or resend
+                later.
+              </p>
+            )}
+            {credentials.email_status === "not_sent" && (
+              <p className="rounded border bg-muted/40 px-3 py-2 text-sm">
+                Email sending was turned off. Share the credentials below directly.
+              </p>
+            )}
             <div className="rounded-md bg-muted p-4 font-mono text-sm space-y-1">
               <p>Sign-in email: {credentials.candidate.email}</p>
               <p>Password: {credentials.initial_password}</p>
@@ -216,6 +231,12 @@ function ImportButton({
   const [open, setOpen] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
+  const [report, setReport] = useState<{
+    imported_rows: number;
+    total_rows: number;
+    failed_rows: number;
+    errors: { row: number; error: string }[];
+  } | null>(null);
 
   async function upload(file: File) {
     setBusy(true);
@@ -234,13 +255,15 @@ function ImportButton({
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error?.code ?? "import failed");
       const data = payload.data;
-      toast.success(
-        `Imported ${data.imported_rows}/${data.total_rows} rows` +
-          (data.failed_rows ? ` — ${data.failed_rows} failed (see batch report)` : "")
-      );
+      setReport(data);
       onDone();
-      setOpen(false);
-      setFile(null);
+      if (data.failed_rows) {
+        toast.warning(`Imported ${data.imported_rows}/${data.total_rows} rows`);
+      } else {
+        toast.success(`Imported all ${data.imported_rows} candidates`);
+        setOpen(false);
+        setFile(null);
+      }
     } catch (error) {
       toast.error(errorText(error));
     } finally {
@@ -276,7 +299,10 @@ function ImportButton({
         open={open}
         onOpenChange={(nextOpen) => {
           setOpen(nextOpen);
-          if (!nextOpen && !busy) setFile(null);
+          if (!nextOpen && !busy) {
+            setFile(null);
+            setReport(null);
+          }
         }}
       >
         <DialogContent>
@@ -287,9 +313,25 @@ function ImportButton({
             CSV columns: studentId, name, email, phone, cgpa
           </p>
           <p className="rounded border bg-muted/40 px-3 py-2 text-sm">{file?.name}</p>
+          {report && (
+            <div className="space-y-2 rounded-lg border p-3 text-sm">
+              <p className="font-medium">
+                Imported {report.imported_rows} of {report.total_rows} candidates
+              </p>
+              {report.errors.length > 0 && (
+                <div className="max-h-48 space-y-1 overflow-y-auto text-destructive">
+                  {report.errors.map((error) => (
+                    <p key={`${error.row}-${error.error}`}>
+                      Row {error.row}: {error.error}
+                    </p>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           <Button
             onClick={() => file && upload(file)}
-            disabled={!file || busy}
+            disabled={!file || busy || Boolean(report)}
           >
             {busy ? "Importing…" : "Upload candidates"}
           </Button>
@@ -390,7 +432,7 @@ export function CandidatesTab({
         method: "POST",
         body: {},
       }),
-    onSuccess: () => toast.success("Invitation resent with fresh credentials"),
+    onSuccess: () => toast.success("Invitation email sent with fresh credentials"),
     onError: (error) => toast.error(errorText(error)),
   });
 
@@ -478,14 +520,26 @@ export function CandidatesTab({
                     >
                       <RotateCcw className="h-4 w-4" />
                     </Button>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      title="Remove candidate"
-                      onClick={() => remove.mutate(row.id)}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                    <ConfirmDialog
+                      trigger={
+                        <Button size="icon" variant="ghost" title="Remove candidate">
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      }
+                      title="Remove this candidate?"
+                      description={
+                        <>
+                          <strong>{row.candidate.full_name}</strong> ({row.candidate.email})
+                          will be removed from this assessment and their credentials
+                          invalidated.
+                        </>
+                      }
+                      warning="This cannot be undone. Any in-progress exam session for this candidate will be terminated."
+                      confirmLabel="Remove candidate"
+                      onConfirm={async () => {
+                        await remove.mutateAsync(row.id);
+                      }}
+                    />
                   </div>
                 </TableCell>
               </TableRow>

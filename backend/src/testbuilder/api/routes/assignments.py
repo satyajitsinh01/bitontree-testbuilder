@@ -21,6 +21,7 @@ from ...services.importer import CSV_TEMPLATE, parse_rows, validate_row
 from ..deps import AdminContext, require_roles
 
 router = APIRouter(tags=["assignments"])
+CANDIDATE_ADMIN_ROLES = ("hr_admin", "test_creator", "evaluator")
 
 
 def _validate_phone(value: str) -> str:
@@ -216,7 +217,7 @@ async def list_assignments(
 async def add_assignment(
     assessment_id: str,
     body: AssignmentIn,
-    ctx: AdminContext = Depends(require_roles("hr_admin")),
+    ctx: AdminContext = Depends(require_roles(*CANDIDATE_ADMIN_ROLES)),
     db: AsyncSession = Depends(get_db),
 ):
     assessment = await _get_assessment(db, ctx.org_id, assessment_id)
@@ -230,8 +231,9 @@ async def add_assignment(
         candidate=candidate,
         send_email=body.send_email,
     )
+    email_status = "not_sent"
     if body.send_email:
-        await send_invitation(
+        message = await send_invitation(
             db,
             org_id=ctx.org_id,
             assignment=assignment,
@@ -239,6 +241,7 @@ async def add_assignment(
             assessment_title=assessment.title,
             password=password,
         )
+        email_status = message.status
     await write_audit(
         db,
         org_id=ctx.org_id,
@@ -256,12 +259,13 @@ async def add_assignment(
     await db.commit()
     out = _assignment_out(assignment, candidate)
     out["initial_password"] = password  # one-time reveal (research R6)
+    out["email_status"] = email_status  # sent | failed | not_sent
     return {"data": out, "error": None}
 
 
 @router.get("/import-batches/template", response_class=PlainTextResponse)
 async def import_template(
-    ctx: AdminContext = Depends(require_roles("hr_admin")),
+    ctx: AdminContext = Depends(require_roles(*CANDIDATE_ADMIN_ROLES)),
 ):
     return CSV_TEMPLATE
 
@@ -271,7 +275,7 @@ async def import_assignments(
     assessment_id: str,
     file: UploadFile = File(...),
     send_email: bool = Query(False),
-    ctx: AdminContext = Depends(require_roles("hr_admin")),
+    ctx: AdminContext = Depends(require_roles(*CANDIDATE_ADMIN_ROLES)),
     db: AsyncSession = Depends(get_db),
 ):
     assessment = await _get_assessment(db, ctx.org_id, assessment_id)
@@ -285,11 +289,21 @@ async def import_assignments(
     await db.flush()
     try:
         rows = parse_rows(file.filename or "upload.csv", content)
-    except Exception:
+    except (UnicodeError, ValueError) as error:
         batch.status = "failed"
-        batch.errors = [{"row": 0, "error": "could not parse file"}]
+        batch.errors = [{"row": 1, "error": str(error)}]
         await db.commit()
-        return {"data": {"batch_id": batch.id, "status": "failed"}, "error": None}
+        return {
+            "data": {
+                "batch_id": batch.id,
+                "status": "failed",
+                "total_rows": 0,
+                "imported_rows": 0,
+                "failed_rows": 1,
+                "errors": batch.errors,
+            },
+            "error": None,
+        }
 
     errors: list[dict] = []
     imported = 0
@@ -385,6 +399,7 @@ async def import_assignments(
             "total_rows": batch.total_rows,
             "imported_rows": imported,
             "failed_rows": len(errors),
+            "errors": errors,
         },
         "error": None,
     }
@@ -393,7 +408,7 @@ async def import_assignments(
 @router.get("/import-batches/{batch_id}")
 async def get_batch(
     batch_id: str,
-    ctx: AdminContext = Depends(require_roles("hr_admin")),
+    ctx: AdminContext = Depends(require_roles(*CANDIDATE_ADMIN_ROLES)),
     db: AsyncSession = Depends(get_db),
 ):
     batch = (
@@ -436,7 +451,7 @@ async def _get_assignment(
 async def patch_assignment(
     assignment_id: str,
     body: AssignmentPatch,
-    ctx: AdminContext = Depends(require_roles("hr_admin")),
+    ctx: AdminContext = Depends(require_roles(*CANDIDATE_ADMIN_ROLES)),
     db: AsyncSession = Depends(get_db),
 ):
     assignment, candidate, assessment = await _get_assignment(db, ctx.org_id, assignment_id)
@@ -500,7 +515,7 @@ async def patch_assignment(
 async def remove_assignment(
     assignment_id: str,
     confirm: bool = Query(False),
-    ctx: AdminContext = Depends(require_roles("hr_admin")),
+    ctx: AdminContext = Depends(require_roles(*CANDIDATE_ADMIN_ROLES)),
     db: AsyncSession = Depends(get_db),
 ):
     assignment, candidate, _ = await _get_assignment(db, ctx.org_id, assignment_id)
@@ -532,7 +547,7 @@ async def remove_assignment(
 @router.post("/assignments/{assignment_id}/resend-invitation")
 async def resend_invitation(
     assignment_id: str,
-    ctx: AdminContext = Depends(require_roles("hr_admin")),
+    ctx: AdminContext = Depends(require_roles(*CANDIDATE_ADMIN_ROLES)),
     db: AsyncSession = Depends(get_db),
 ):
     assignment, candidate, assessment = await _get_assignment(db, ctx.org_id, assignment_id)
@@ -541,7 +556,7 @@ async def resend_invitation(
     # regenerate password so the resent mail contains working credentials
     password, password_hash = make_credentials()
     assignment.password_hash = password_hash
-    await send_invitation(
+    message = await send_invitation(
         db,
         org_id=ctx.org_id,
         assignment=assignment,
@@ -558,11 +573,22 @@ async def resend_invitation(
         action="invitation.resent",
         entity_type="assignment",
         entity_id=assignment.id,
+        after={"email_status": message.status},
         request_id=ctx.request_id,
         ip=ctx.ip,
     )
     await db.commit()
-    return {"data": {"sent": True}, "error": None}
+    if message.status != "sent":
+        # surface the failure instead of silently claiming success
+        raise HTTPException(
+            502,
+            {
+                "code": "email_send_failed",
+                "message": "The email server rejected the message. Check the mail "
+                "configuration (TB_SMTP_* / TB_RESEND_API_KEY) and try again.",
+            },
+        )
+    return {"data": {"sent": True, "status": message.status}, "error": None}
 
 
 class RecoverySessionIn(BaseModel):
@@ -573,7 +599,7 @@ class RecoverySessionIn(BaseModel):
 async def create_recovery_session(
     assignment_id: str,
     body: RecoverySessionIn,
-    ctx: AdminContext = Depends(require_roles("hr_admin")),
+    ctx: AdminContext = Depends(require_roles(*CANDIDATE_ADMIN_ROLES)),
     db: AsyncSession = Depends(get_db),
 ):
     """Create a fresh session after a technical problem within the fixed window."""
@@ -624,7 +650,7 @@ async def create_recovery_session(
 @router.get("/assignments/{assignment_id}/emails")
 async def assignment_emails(
     assignment_id: str,
-    ctx: AdminContext = Depends(require_roles("hr_admin")),
+    ctx: AdminContext = Depends(require_roles(*CANDIDATE_ADMIN_ROLES)),
     db: AsyncSession = Depends(get_db),
 ):
     await _get_assignment(db, ctx.org_id, assignment_id)

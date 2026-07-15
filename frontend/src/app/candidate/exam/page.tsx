@@ -26,7 +26,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { CheckCircle2 } from "lucide-react";
+import { AlertTriangle, CheckCircle2 } from "lucide-react";
 
 interface Summary {
   assessment_title: string;
@@ -198,6 +198,8 @@ function ExamShell({
     )
   );
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [fullscreenExited, setFullscreenExited] = useState(false);
+  const [reentering, setReentering] = useState(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -209,6 +211,27 @@ function ExamShell({
       )
     );
   }, [state.current_section_id, state.questions]);
+
+  // Full-screen guard: leaving full screen raises a blocking warning modal
+  // (the exit itself is also recorded as a red flag by the proctor guard).
+  useEffect(() => {
+    const onChange = () => setFullscreenExited(!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", onChange);
+    setFullscreenExited(!document.fullscreenElement);
+    return () => document.removeEventListener("fullscreenchange", onChange);
+  }, []);
+
+  async function reenterFullscreen() {
+    setReentering(true);
+    try {
+      await document.documentElement.requestFullscreen();
+      setFullscreenExited(false);
+    } catch {
+      toast.error("Could not enter full screen. Press F11 or allow full screen.");
+    } finally {
+      setReentering(false);
+    }
+  }
 
   const activeSection = state.sections.find(
     (s) => s.section_id === state.current_section_id
@@ -384,7 +407,7 @@ function ExamShell({
               {activeSection?.is_final ? (
                 <Button onClick={() => setConfirmOpen(true)}>Submit and End Test</Button>
               ) : (
-                <Button onClick={submitSection}>Submit section â†’</Button>
+                <Button onClick={submitSection}>Submit section →</Button>
               )}
             </div>
           </CardContent>
@@ -443,6 +466,32 @@ function ExamShell({
               Keep working
             </Button>
             <Button onClick={submitExam}>Submit and End Test</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Full-screen guard — blocking modal shown whenever full screen is left */}
+      <Dialog open={fullscreenExited} onOpenChange={() => {}}>
+        <DialogContent showCloseButton={false} className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-destructive" />
+              You left full screen
+            </DialogTitle>
+          </DialogHeader>
+          <p className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+            Warning: leaving full-screen mode is a proctoring violation and has been
+            recorded as a red flag on your attempt. Repeated violations may invalidate
+            your assessment.
+          </p>
+          <p className="text-sm text-muted-foreground">
+            You must return to full screen to continue the exam. Your timer keeps
+            running while this message is shown.
+          </p>
+          <div className="flex justify-end">
+            <Button onClick={reenterFullscreen} disabled={reentering}>
+              {reentering ? "Returning…" : "Return to full screen"}
+            </Button>
           </div>
         </DialogContent>
       </Dialog>

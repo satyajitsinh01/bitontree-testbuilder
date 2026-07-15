@@ -6,9 +6,12 @@ import pytest_asyncio
 
 os.environ.setdefault("TB_JWT_SECRET", "test-secret-0123456789abcdef0123456789abcdef")
 os.environ.setdefault("TB_ACCESS_TOKEN_MINUTES", "120")  # survives time-travel tests
-os.environ.setdefault("TB_GEMINI_API_KEY", "")  # force AI stub
-os.environ.setdefault("TB_RESEND_API_KEY", "")  # force console email transport
-os.environ.setdefault("TB_JUDGE0_URL", "")
+# Hard-disable every external transport so the suite is hermetic and never hits a
+# real Gmail/Resend/Judge0/Gemini service picked up from a developer's .env.
+os.environ["TB_GEMINI_API_KEY"] = ""  # force AI stub
+os.environ["TB_RESEND_API_KEY"] = ""  # no Resend
+os.environ["TB_SMTP_HOST"] = ""  # no SMTP -> console email transport
+os.environ["TB_JUDGE0_URL"] = ""  # fail-closed runner (overridden by FakeRunner)
 
 
 def now() -> datetime:

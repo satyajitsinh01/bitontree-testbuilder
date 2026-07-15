@@ -17,7 +17,8 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Rocket } from "lucide-react";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { Pencil, Rocket, Trash2 } from "lucide-react";
 
 function AddSectionDialog({
   assessmentId,
@@ -129,6 +130,134 @@ function AddSectionDialog({
             Add section
           </Button>
         </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function EditSectionDialog({
+  section,
+  allocatedWeight,
+  allocatedDuration,
+  availableDuration,
+  frozen,
+  onChanged,
+}: {
+  section: SectionOut;
+  allocatedWeight: number;
+  allocatedDuration: number;
+  availableDuration: number;
+  frozen: boolean;
+  onChanged: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState(section.name);
+  const [duration, setDuration] = useState(section.duration_min);
+  const [weightage, setWeightage] = useState(section.weightage_pct);
+  const [isFinal, setIsFinal] = useState(section.is_final);
+  // remaining budget excludes this section's own current allocation
+  const remainingWeight = Math.max(0, 100 - (allocatedWeight - section.weightage_pct));
+  const remainingDuration = Math.max(
+    0,
+    availableDuration - (allocatedDuration - section.duration_min)
+  );
+
+  const save = useMutation({
+    mutationFn: () =>
+      api(`/sections/${section.id}`, {
+        token: "admin",
+        method: "PATCH",
+        body: {
+          name,
+          duration_min: duration,
+          weightage_pct: weightage,
+          question_count: section.question_count,
+          is_final: isFinal,
+        },
+      }),
+    onSuccess: () => {
+      toast.success("Section updated");
+      setOpen(false);
+      onChanged();
+    },
+    onError: (error) => toast.error(errorText(error)),
+  });
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger
+        render={<Button size="icon" variant="ghost" title="Edit section" />}
+      >
+        <Pencil className="h-4 w-4" />
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Edit section</DialogTitle>
+        </DialogHeader>
+        {frozen ? (
+          <p className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+            This version is frozen because candidates have started. Edit the assessment
+            details first to fork a new draft version, then edit its sections.
+          </p>
+        ) : (
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Name</Label>
+              <Input value={name} onChange={(e) => setName(e.target.value)} />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Duration (minutes)</Label>
+                <Input
+                  type="number"
+                  min={1}
+                  max={remainingDuration}
+                  value={duration}
+                  onChange={(e) => setDuration(Number(e.target.value))}
+                />
+                <p className="text-xs text-muted-foreground">
+                  {remainingDuration} min available for this section
+                </p>
+              </div>
+              <div className="space-y-2">
+                <Label>Weightage (%)</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  max={remainingWeight}
+                  step={0.01}
+                  value={weightage}
+                  onChange={(e) => setWeightage(Number(e.target.value))}
+                />
+                <p className="text-xs text-muted-foreground">
+                  {remainingWeight}% available for this section
+                </p>
+              </div>
+            </div>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={isFinal}
+                onChange={(e) => setIsFinal(e.target.checked)}
+              />
+              Final section (ends with “Submit and End Test”)
+            </label>
+            <Button
+              className="w-full"
+              onClick={() => save.mutate()}
+              disabled={
+                !name.trim() ||
+                weightage < 0 ||
+                weightage > remainingWeight ||
+                duration < 1 ||
+                duration > remainingDuration ||
+                save.isPending
+              }
+            >
+              {save.isPending ? "Saving…" : "Save changes"}
+            </Button>
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   );
@@ -265,6 +394,16 @@ export function BuilderTab({
     onError: (error) => toast.error(errorText(error)),
   });
 
+  const deleteSection = useMutation({
+    mutationFn: (sectionId: string) =>
+      api(`/sections/${sectionId}`, { token: "admin", method: "DELETE" }),
+    onSuccess: () => {
+      toast.success("Section deleted");
+      onChanged();
+    },
+    onError: (error) => toast.error(errorText(error)),
+  });
+
   const sections = assessment.version?.sections ?? [];
   const totalWeight = sections.reduce((sum, s) => sum + s.weightage_pct, 0);
   const totalDuration = sections.reduce((sum, s) => sum + s.duration_min, 0);
@@ -333,7 +472,40 @@ export function BuilderTab({
                 {section.order_index + 1}. {section.name}
                 {section.is_final && <Badge variant="secondary">final</Badge>}
               </CardTitle>
-              <SectionQuestionsDialog section={section} onChanged={onChanged} />
+              <div className="flex items-center gap-1">
+                <SectionQuestionsDialog section={section} onChanged={onChanged} />
+                <EditSectionDialog
+                  section={section}
+                  allocatedWeight={totalWeight}
+                  allocatedDuration={totalDuration}
+                  availableDuration={availableDuration}
+                  frozen={frozen}
+                  onChanged={onChanged}
+                />
+                <ConfirmDialog
+                  trigger={
+                    <Button size="icon" variant="ghost" title="Delete section">
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  }
+                  title="Delete this section?"
+                  description={
+                    <>
+                      Section <strong>{section.name}</strong> and its attached questions
+                      and pool rules will be removed from the assessment.
+                    </>
+                  }
+                  warning={
+                    frozen
+                      ? "This version is frozen. Edit the assessment details first to fork a new draft version."
+                      : "This cannot be undone. Remaining section weightages must still total 100% before you can publish."
+                  }
+                  confirmLabel="Delete section"
+                  onConfirm={async () => {
+                    await deleteSection.mutateAsync(section.id);
+                  }}
+                />
+              </div>
             </CardHeader>
             <CardContent className="text-sm text-muted-foreground flex gap-6">
               <span>{section.duration_min} min</span>

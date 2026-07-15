@@ -93,6 +93,7 @@ export interface AssignmentOut {
   credentials_expired: boolean;
   send_email: boolean;
   initial_password?: string;
+  email_status?: "sent" | "failed" | "not_sent";
 }
 
 export interface ExamQuestion {
