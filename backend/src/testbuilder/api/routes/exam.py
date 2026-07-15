@@ -150,13 +150,11 @@ async def _session_questions_out(
             by_id = {o["id"]: o for o in config.get("options", [])}
             config["options"] = [by_id[i] for i in sq.option_order if i in by_id]
         if version.qtype == "coding":
-            config["test_cases"] = [
-                {k: v for k, v in case.items() if k != "expected_output"}
-                if case.get("is_hidden")
-                else case
-                for case in config.get("test_cases", [])
-                if not case.get("is_hidden")
-            ]
+            all_cases = config.get("test_cases", [])
+            # sample cases are visible (with args + expected); hidden cases are
+            # removed entirely and only their count is exposed
+            config["test_cases"] = [c for c in all_cases if not c.get("is_hidden")]
+            config["hidden_case_count"] = sum(1 for c in all_cases if c.get("is_hidden"))
         out.append(
             {
                 "session_question_id": sq.id,
@@ -164,6 +162,8 @@ async def _session_questions_out(
                 "order_index": sq.order_index,
                 "qtype": version.qtype,
                 "answer_type": version.answer_type,
+                "difficulty": version.difficulty,
+                "tags": version.tags,
                 "title": version.title,
                 "body": version.body,
                 "config": config,

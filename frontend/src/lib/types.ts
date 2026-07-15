@@ -7,8 +7,23 @@ export interface TestCase {
   id: string;
   input?: string;
   expected_output?: string;
+  // LeetCode-style typed cases
+  args?: unknown[];
+  expected?: unknown;
   is_hidden?: boolean;
   weight?: number;
+}
+
+export interface CodingSignature {
+  function_name: string;
+  params: { name: string; type: string }[];
+  return_type: string;
+}
+
+export interface CodingExample {
+  input: string;
+  output: string;
+  explanation?: string;
 }
 
 export interface QuestionConfig {
@@ -19,6 +34,18 @@ export interface QuestionConfig {
   allowed_languages?: string[];
   starter_code?: Record<string, string>;
   test_cases?: TestCase[];
+  // LeetCode-style coding fields
+  signature?: CodingSignature;
+  description?: string;
+  input_format?: string;
+  output_format?: string;
+  constraints?: string;
+  notes?: string;
+  tags?: string[];
+  examples?: CodingExample[];
+  hidden_case_count?: number;
+  time_limit_ms?: number;
+  memory_limit_kb?: number;
 }
 
 export interface QuestionVersionOut {
@@ -107,6 +134,8 @@ export interface ExamQuestion {
   order_index: number;
   qtype: "mcq" | "text" | "coding";
   answer_type: string;
+  difficulty?: string;
+  tags?: string[];
   title: string;
   body: string;
   config: QuestionConfig;
@@ -144,6 +173,9 @@ export interface CaseResultOut {
   time_ms: number;
   memory_kb: number;
   hidden?: boolean;
+  custom?: boolean;
+  expected_display?: string | null;
+  input_display?: string | null;
 }
 
 export interface CodeRunOut {

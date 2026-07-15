@@ -17,8 +17,17 @@ GENERATION_SCHEMA_HINT = (
     "\"config\": object, \"topic\": str, \"skills\": [str]}]}. "
     "For mcq config: {options: [{id, text}], correct_option_ids: [id]}. "
     "For text config: {rubric, expected_answer}. "
-    "For coding config: {allowed_languages, starter_code, test_cases: "
-    "[{id, input, expected_output, is_hidden, weight}]}."
+    "For a LeetCode-style coding config include ALL of: "
+    "signature:{function_name, params:[{name,type}], return_type} where type is one of "
+    "int,long,double,bool,string and their [] / [][] array forms; "
+    "description, input_format, output_format, constraints, notes (ALL Markdown so the "
+    "UI can render headings, lists, tables, code); tags:[str]; "
+    "examples:[{input, output, explanation(Markdown)}]; "
+    "test_cases:[{id, args:[<value per parameter>], expected:<value>, is_hidden:bool, "
+    "weight:int}] with at least 2 visible sample cases and 3 hidden cases; "
+    "time_limit_ms:int; memory_limit_kb:int. "
+    "Do NOT include starter_code — it is generated from the signature. "
+    "args and expected must be concrete JSON values matching the signature types."
 )
 
 
@@ -39,6 +48,63 @@ def _gemini_json(prompt: str) -> dict:
     return json.loads(response.text)
 
 
+def _stub_coding_config(topic: str, difficulty: str, marker: str) -> dict:
+    """A complete LeetCode-style 'Sum of Two' problem so the stub renders a full
+    problem page (real Gemini output follows the same shape)."""
+    return {
+        "signature": {
+            "function_name": "sumTwo",
+            "params": [{"name": "nums", "type": "int[]"}, {"name": "target", "type": "int"}],
+            "return_type": "int[]",
+        },
+        "description": (
+            f"## Pair Sum ({marker})\n\n"
+            "Given an array of integers `nums` and an integer `target`, return the "
+            "**indices** of the two numbers that add up to `target`.\n\n"
+            "You may assume exactly one solution exists and you may not use the same "
+            "element twice."
+        ),
+        "input_format": (
+            "- `nums`: an array of integers\n- `target`: an integer"
+        ),
+        "output_format": "An array of two indices `[i, j]` with `i < j`.",
+        "constraints": (
+            "- `2 <= nums.length <= 10^4`\n"
+            "- `-10^9 <= nums[i] <= 10^9`\n"
+            "- Exactly one valid answer exists."
+        ),
+        "notes": "Aim for a single-pass hash map solution in **O(n)** time.",
+        "tags": [topic, "array", "hash-table"],
+        "examples": [
+            {
+                "input": "nums = [2,7,11,15], target = 9",
+                "output": "[0,1]",
+                "explanation": "Because `nums[0] + nums[1] == 9`, we return `[0, 1]`.",
+            },
+            {
+                "input": "nums = [3,2,4], target = 6",
+                "output": "[1,2]",
+                "explanation": "`nums[1] + nums[2] == 6`.",
+            },
+        ],
+        "test_cases": [
+            {"id": "s1", "args": [[2, 7, 11, 15], 9], "expected": [0, 1],
+             "is_hidden": False, "weight": 1},
+            {"id": "s2", "args": [[3, 2, 4], 6], "expected": [1, 2],
+             "is_hidden": False, "weight": 1},
+            {"id": "h1", "args": [[3, 3], 6], "expected": [0, 1],
+             "is_hidden": True, "weight": 1},
+            {"id": "h2", "args": [[1, 5, 9, 2], 11], "expected": [1, 2],
+             "is_hidden": True, "weight": 1},
+            {"id": "h3", "args": [[0, 4, 3, 0], 0], "expected": [0, 3],
+             "is_hidden": True, "weight": 1},
+        ],
+        "time_limit_ms": 5000,
+        "memory_limit_kb": 256000,
+        "show_case_results": "visible_only",
+    }
+
+
 def _stub_questions(qtype: str, count: int, difficulty: str, topic: str) -> list[dict]:
     import uuid
 
@@ -54,16 +120,7 @@ def _stub_questions(qtype: str, count: int, difficulty: str, topic: str) -> list
             }
             answer_type = "single_choice"
         elif qtype == "coding":
-            config = {
-                "allowed_languages": ["python", "javascript"],
-                "starter_code": {"python": "def solve():\n    pass\n"},
-                "test_cases": [
-                    {"id": "t1", "input": "1", "expected_output": "1", "is_hidden": False,
-                     "weight": 1},
-                    {"id": "t2", "input": "2", "expected_output": "2", "is_hidden": True,
-                     "weight": 2},
-                ],
-            }
+            config = _stub_coding_config(topic, difficulty, marker)
             answer_type = "code"
         else:
             config = {"rubric": f"Assess understanding of {topic}", "expected_answer": ""}

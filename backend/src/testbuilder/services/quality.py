@@ -22,21 +22,60 @@ def structural_errors(qtype: str, config: dict) -> list[str]:
         if set(correct) - option_ids:
             errors.append("correct_option_ids must reference existing options")
     elif qtype == "coding":
-        cases = config.get("test_cases") or []
-        if not cases:
-            errors.append("coding question requires test cases")
-        for case in cases:
-            if "input" not in case or "expected_output" not in case:
-                errors.append("each test case needs input and expected_output")
-                break
-        langs = config.get("allowed_languages") or []
-        if not langs:
-            errors.append("coding question requires allowed_languages")
+        errors.extend(_coding_errors(config))
     elif qtype == "text":
         if not (config.get("rubric") or config.get("expected_answer")):
             errors.append("text question requires a rubric or expected answer")
     else:
         errors.append(f"unknown question type: {qtype}")
+    return errors
+
+
+def _coding_errors(config: dict) -> list[str]:
+    """Coding questions come in two shapes: LeetCode-style (a typed `signature`
+    with `args`/`expected` cases) or legacy stdin/stdout (`input`/`expected_output`)."""
+    from . import harness
+
+    errors: list[str] = []
+    langs = config.get("allowed_languages") or []
+    if not langs:
+        errors.append("coding question requires allowed_languages")
+    cases = config.get("test_cases") or []
+    if not cases:
+        errors.append("coding question requires test cases")
+
+    signature = config.get("signature")
+    if signature is not None:
+        sig_errors = harness.validate_signature(signature)
+        errors.extend(sig_errors)
+        if not sig_errors:
+            n_params = len(signature["params"])
+            starter = config.get("starter_code") or {}
+            for lang in langs:
+                if lang not in harness.languages_supporting(signature):
+                    errors.append(
+                        f"language '{lang}' cannot execute this signature's types"
+                    )
+                elif not starter.get(lang):
+                    errors.append(f"starter_code missing for language '{lang}'")
+            for case in cases:
+                if not isinstance(case.get("args"), list) or "expected" not in case:
+                    errors.append("each test case needs 'args' (list) and 'expected'")
+                    break
+                if len(case["args"]) != n_params:
+                    errors.append(
+                        f"test case '{case.get('id')}' has {len(case['args'])} args, "
+                        f"signature expects {n_params}"
+                    )
+                    break
+            if not any(c.get("is_hidden") for c in cases):
+                errors.append("coding question should include at least one hidden test case")
+    else:
+        # legacy stdin/stdout questions
+        for case in cases:
+            if "input" not in case or "expected_output" not in case:
+                errors.append("each test case needs input and expected_output")
+                break
     return errors
 
 

@@ -19,6 +19,7 @@ from ...models import (
 from ...models.base import now_utc
 from ...models.questions import DIFFICULTIES, QTYPES
 from ...services import ai as ai_service
+from ...services import harness
 from ...services.audit import write_audit
 from ...services.quality import (
     DUPLICATE_THRESHOLD,
@@ -191,6 +192,8 @@ async def create_question(
     ctx: AdminContext = Depends(require_roles("test_creator")),
     db: AsyncSession = Depends(get_db),
 ):
+    if body.qtype == "coding" and body.config.get("signature"):
+        body.config = harness.autofill_coding_config(body.config)
     errors = structural_errors(body.qtype, body.config)
     if errors:
         raise HTTPException(422, {"code": "invalid_structure", "details": errors})
@@ -263,22 +266,62 @@ IMPORT_TEMPLATE = {
         {
             "qtype": "coding",
             "title": "Two Sum",
-            "body": "Return indices of the two numbers that add up to target.",
-            "difficulty": "hard",
+            "difficulty": "easy",
+            "category": "Algorithms",
+            "topic": "arrays",
+            "tags": ["array", "hash-table"],
             "answer_type": "code",
             "config": {
-                "allowed_languages": ["python", "javascript"],
-                "starter_code": {
-                    "python": "def two_sum(nums, target):\n    # write your logic here\n    pass\n",
-                    "javascript": "function twoSum(nums, target) {\n"
-                    "  // write your logic here\n}\n",
+                # starter_code is generated from the signature — you may omit it.
+                "signature": {
+                    "function_name": "twoSum",
+                    "params": [
+                        {"name": "nums", "type": "int[]"},
+                        {"name": "target", "type": "int"},
+                    ],
+                    "return_type": "int[]",
                 },
-                "test_cases": [
-                    {"id": "t1", "input": "2 7 11 15\n9", "expected_output": "0 1",
-                     "is_hidden": False, "weight": 1},
-                    {"id": "t2", "input": "3 2 4\n6", "expected_output": "1 2",
-                     "is_hidden": True, "weight": 2},
+                "allowed_languages": ["python", "javascript", "java", "cpp"],
+                "description": (
+                    "Given an array of integers `nums` and an integer `target`, "
+                    "return the **indices** of the two numbers such that they add up "
+                    "to `target`.\n\nYou may assume that each input has *exactly one* "
+                    "solution, and you may not use the same element twice."
+                ),
+                "input_format": "- `nums`: array of integers\n- `target`: integer",
+                "output_format": "An array `[i, j]` of the two indices (`i < j`).",
+                "constraints": (
+                    "- `2 <= nums.length <= 10^4`\n"
+                    "- `-10^9 <= nums[i], target <= 10^9`\n"
+                    "- Exactly one valid answer exists."
+                ),
+                "notes": "Try to solve it in **O(n)** time with a hash map.",
+                "examples": [
+                    {
+                        "input": "nums = [2,7,11,15], target = 9",
+                        "output": "[0,1]",
+                        "explanation": "`nums[0] + nums[1] == 9`, so return `[0, 1]`.",
+                    },
+                    {
+                        "input": "nums = [3,2,4], target = 6",
+                        "output": "[1,2]",
+                        "explanation": "`nums[1] + nums[2] == 6`.",
+                    },
                 ],
+                "test_cases": [
+                    {"id": "s1", "args": [[2, 7, 11, 15], 9], "expected": [0, 1],
+                     "is_hidden": False, "weight": 1},
+                    {"id": "s2", "args": [[3, 2, 4], 6], "expected": [1, 2],
+                     "is_hidden": False, "weight": 1},
+                    {"id": "h1", "args": [[3, 3], 6], "expected": [0, 1],
+                     "is_hidden": True, "weight": 1},
+                    {"id": "h2", "args": [[0, 4, 3, 0], 0], "expected": [0, 3],
+                     "is_hidden": True, "weight": 1},
+                    {"id": "h3", "args": [[-1, -2, -3, -4], -6], "expected": [1, 3],
+                     "is_hidden": True, "weight": 1},
+                ],
+                "time_limit_ms": 5000,
+                "memory_limit_kb": 256000,
                 "show_case_results": "visible_only",
             },
         },
@@ -336,6 +379,8 @@ async def import_questions(
             problems.append("title is required (min 3 chars)")
         if difficulty not in DIFFICULTIES:
             problems.append(f"difficulty must be one of {DIFFICULTIES}")
+        if qtype == "coding" and config.get("signature"):
+            config = harness.autofill_coding_config(config)
         if qtype in QTYPES:
             problems.extend(structural_errors(qtype, config))
         if problems:
@@ -659,7 +704,9 @@ async def ai_generate(
                 difficulty=item.get("difficulty", body.difficulty),
                 title=str(item.get("title", "Untitled"))[:300],
                 body=str(item.get("body", "")),
-                config=item.get("config") or {},
+                config=harness.autofill_coding_config(item.get("config") or {})
+                if item.get("qtype", body.qtype) == "coding"
+                else (item.get("config") or {}),
                 topic=str(item.get("topic", body.topic)),
                 skills=item.get("skills") or body.skills,
             )
