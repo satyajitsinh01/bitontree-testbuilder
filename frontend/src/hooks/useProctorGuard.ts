@@ -10,7 +10,10 @@ type EventKind =
   | "copy_attempt"
   | "paste_attempt"
   | "camera_lost"
-  | "capture_failed";
+  | "capture_failed"
+  | "devtools_open"
+  | "screen_capture_attempt"
+  | "window_resized";
 
 interface ProctorEvent {
   kind: EventKind;
@@ -20,9 +23,26 @@ interface ProctorEvent {
 
 const FLUSH_INTERVAL_MS = 4000;
 const SCREENSHOT_INTERVAL_MS = 5000;
+const DEVTOOLS_POLL_MS = 2000;
+const DEVTOOLS_GAP_PX = 200;
+const RESIZE_TOLERANCE_PX = 40;
+const RESIZE_DEBOUNCE_MS = 600;
 
-/** Client half of proctoring (FR-070..072): raises events for tab switches,
- * blur, fullscreen exit, copy/paste; captures periodic webcam screenshots. */
+// devtools / view-source key combos to block outright
+function isDevtoolsCombo(e: KeyboardEvent): string | null {
+  if (e.key === "F12") return "F12";
+  if (e.ctrlKey && e.shiftKey && ["I", "J", "C", "i", "j", "c"].includes(e.key))
+    return `Ctrl+Shift+${e.key.toUpperCase()}`;
+  if (e.ctrlKey && ["U", "u"].includes(e.key)) return "Ctrl+U";
+  if (e.ctrlKey && ["S", "s", "P", "p"].includes(e.key))
+    return `Ctrl+${e.key.toUpperCase()}`; // save page / print
+  return null;
+}
+
+/** Client half of proctoring (FR-070..072): raises red-flag events for tab
+ * switches, app/window switches, devtools & right-click attempts, screenshot
+ * key presses, and window shrinking below its starting size; captures periodic
+ * webcam snapshots. */
 export function useProctorGuard(active: boolean, onWarning: (message: string) => void) {
   const queue = useRef<ProctorEvent[]>([]);
   const stream = useRef<MediaStream | null>(null);
@@ -42,13 +62,21 @@ export function useProctorGuard(active: boolean, onWarning: (message: string) =>
   useEffect(() => {
     if (!active) return;
 
+    // window size baseline: shrinking below the starting size is a red flag
+    const baseline = { width: window.innerWidth, height: window.innerHeight };
+    let resizeTimer: ReturnType<typeof setTimeout> | null = null;
+    let devtoolsFlagged = false;
+
     const onVisibility = () => {
       if (document.hidden) {
         push("tab_switch");
-        onWarning("Tab switch recorded. Stay on the exam tab.");
+        onWarning("Tab switch recorded as a red flag. Stay on the exam tab.");
       }
     };
-    const onBlur = () => push("window_blur");
+    const onBlur = () => {
+      push("window_blur");
+      onWarning("Leaving the exam window is recorded as a red flag.");
+    };
     const onFullscreen = () => {
       if (!document.fullscreenElement) {
         push("fullscreen_exit");
@@ -65,12 +93,69 @@ export function useProctorGuard(active: boolean, onWarning: (message: string) =>
       push("paste_attempt");
       onWarning("Pasting is disabled during the exam.");
     };
+    const onContextMenu = (e: MouseEvent) => {
+      e.preventDefault();
+      push("devtools_open", { reason: "context_menu" });
+      onWarning("Right-click is disabled during the exam.");
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      const combo = isDevtoolsCombo(e);
+      if (combo) {
+        e.preventDefault();
+        e.stopPropagation();
+        push("devtools_open", { reason: combo });
+        onWarning("Developer tools are disabled — this attempt was recorded.");
+      }
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      // PrintScreen only reliably fires on keyup
+      if (e.key === "PrintScreen") {
+        push("screen_capture_attempt", { reason: "print_screen" });
+        navigator.clipboard?.writeText("").catch(() => {});
+        onWarning("Screenshots are prohibited — this attempt was recorded.");
+      }
+    };
+    const onResize = () => {
+      if (resizeTimer) clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => {
+        const shrunkWidth = window.innerWidth < baseline.width - RESIZE_TOLERANCE_PX;
+        const shrunkHeight = window.innerHeight < baseline.height - RESIZE_TOLERANCE_PX;
+        if (shrunkWidth || shrunkHeight) {
+          push("window_resized", {
+            baseline,
+            current: { width: window.innerWidth, height: window.innerHeight },
+          });
+          onWarning(
+            "The exam window must stay at its starting size — resizing was recorded."
+          );
+        }
+      }, RESIZE_DEBOUNCE_MS);
+    };
 
     document.addEventListener("visibilitychange", onVisibility);
     window.addEventListener("blur", onBlur);
     document.addEventListener("fullscreenchange", onFullscreen);
     document.addEventListener("copy", onCopy);
     document.addEventListener("paste", onPaste);
+    document.addEventListener("contextmenu", onContextMenu);
+    window.addEventListener("keydown", onKeyDown, true);
+    window.addEventListener("keyup", onKeyUp, true);
+    window.addEventListener("resize", onResize);
+
+    // best-effort docked-devtools heuristic: a large outer/inner gap appears
+    // when the devtools panel opens inside the window
+    const devtoolsPoll = setInterval(() => {
+      const gapWidth = window.outerWidth - window.innerWidth;
+      const gapHeight = window.outerHeight - window.innerHeight;
+      const open = gapWidth > DEVTOOLS_GAP_PX || gapHeight > DEVTOOLS_GAP_PX;
+      if (open && !devtoolsFlagged) {
+        devtoolsFlagged = true;
+        push("devtools_open", { reason: "window_gap", gapWidth, gapHeight });
+        onWarning("Developer tools detected — this has been recorded as a red flag.");
+      } else if (!open) {
+        devtoolsFlagged = false;
+      }
+    }, DEVTOOLS_POLL_MS);
 
     const flusher = setInterval(async () => {
       if (queue.current.length === 0) return;
@@ -129,7 +214,13 @@ export function useProctorGuard(active: boolean, onWarning: (message: string) =>
       document.removeEventListener("fullscreenchange", onFullscreen);
       document.removeEventListener("copy", onCopy);
       document.removeEventListener("paste", onPaste);
+      document.removeEventListener("contextmenu", onContextMenu);
+      window.removeEventListener("keydown", onKeyDown, true);
+      window.removeEventListener("keyup", onKeyUp, true);
+      window.removeEventListener("resize", onResize);
+      clearInterval(devtoolsPoll);
       clearInterval(flusher);
+      if (resizeTimer) clearTimeout(resizeTimer);
       if (screenshotTimer) clearInterval(screenshotTimer);
       stream.current?.getTracks().forEach((track) => track.stop());
     };

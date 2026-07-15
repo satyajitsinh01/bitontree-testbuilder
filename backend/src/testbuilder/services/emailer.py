@@ -1,5 +1,10 @@
-"""Email delivery via Resend (research R10). Without TB_RESEND_API_KEY the
-transport logs to console and marks messages sent, keeping dev/test flows alive."""
+"""Email delivery. Transport priority: SMTP (TB_SMTP_HOST set) > Resend
+(TB_RESEND_API_KEY set) > console logging, so dev/test flows never break."""
+
+import asyncio
+import smtplib
+from email.message import EmailMessage as MimeMessage
+from email.utils import parseaddr
 
 import httpx
 import structlog
@@ -31,7 +36,10 @@ def _invitation_payload(
         "rules": [
             "Camera and microphone access is required for the entire exam.",
             "The exam runs in full screen; leaving full screen is recorded.",
-            "Tab switches, window changes and copy/paste attempts are recorded.",
+            "Switching to any other app, tab or window is recorded as a red flag.",
+            "Developer tools, right-click, copy/paste and screenshots are disabled; "
+            "attempts are recorded as red flags.",
+            "Keep the browser window at its starting size; shrinking it is flagged.",
             "Each section is timed and auto-submits when time expires.",
         ],
         "system_requirements": [
@@ -66,6 +74,43 @@ def _render_text(kind: str, payload: dict) -> str:
     return "\n".join(lines)
 
 
+def _smtp_from_address(settings) -> tuple[str, str]:
+    """Returns (display_name, address). Gmail rewrites the From header to the
+    authenticated account, so for Gmail we send as the SMTP username directly —
+    anything else risks DMARC failure or silent rewriting."""
+    display, address = parseaddr(settings.email_from)
+    if not address:
+        address = settings.smtp_username
+    if "gmail" in settings.smtp_host.lower():
+        address = settings.smtp_username
+    return display or "TestBuilder", address
+
+
+def _smtp_send_sync(settings, to_email: str, subject: str, text_body: str) -> None:
+    """Blocking SMTP send; run via asyncio.to_thread. Raises on failure."""
+    display, from_address = _smtp_from_address(settings)
+    mime = MimeMessage()
+    mime["From"] = f"{display} <{from_address}>"
+    mime["To"] = to_email
+    mime["Subject"] = subject
+    mime.set_content(text_body)
+
+    if settings.smtp_use_ssl:
+        server = smtplib.SMTP_SSL(settings.smtp_host, settings.smtp_port, timeout=20)
+    else:
+        server = smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=20)
+    try:
+        server.ehlo()
+        if settings.smtp_use_tls and not settings.smtp_use_ssl:
+            server.starttls()
+            server.ehlo()
+        if settings.smtp_username:
+            server.login(settings.smtp_username, settings.smtp_password)
+        server.send_message(mime, from_addr=from_address, to_addrs=[to_email])
+    finally:
+        server.quit()
+
+
 async def send_email(
     db: AsyncSession,
     *,
@@ -86,6 +131,18 @@ async def send_email(
     db.add(message)
     subject = f"[TestBuilder] {payload.get('assessment_title', 'Assessment')} — {kind}"
     body = _render_text(kind, payload)
+
+    if settings.smtp_host:
+        try:
+            await asyncio.to_thread(_smtp_send_sync, settings, candidate.email,
+                                    subject, body)
+            message.status = "sent"
+            message.sent_at = now_utc()
+        except (smtplib.SMTPException, OSError) as exc:
+            message.status = "failed"
+            log.warning("email_smtp_error", error=str(exc), to=candidate.email)
+        return message
+
     if not settings.resend_api_key:
         log.info("email_console_transport", to=candidate.email, subject=subject)
         message.status = "sent"

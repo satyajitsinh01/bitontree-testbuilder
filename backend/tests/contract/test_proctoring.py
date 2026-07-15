@@ -56,14 +56,14 @@ async def test_event_batch_ingest_and_timeline(client, admin):
     assert [e["kind"] for e in events] == ["tab_switch", "fullscreen_exit", "camera_lost"]
     severities = {e["kind"]: e["severity"] for e in events}
     assert severities["camera_lost"] == "red_flag"  # standard policy default
-    assert severities["tab_switch"] == "warning"
+    assert severities["tab_switch"] == "red_flag"  # leaving the exam = red flag
 
     flags = await client.get(
         f"/api/v1/sessions/{state['session_id']}/proctoring/flags",
         headers=admin["headers"],
     )
     data = flags.json()["data"]
-    assert len(data["red_flags"]) == 1 and len(data["warnings"]) == 2
+    assert len(data["red_flags"]) == 2 and len(data["warnings"]) == 1
 
 
 async def test_invalid_event_kind_422(client, admin):
@@ -115,8 +115,8 @@ async def test_evidence_upload_and_flag_counts_in_report(client, admin):
         f"/api/v1/sessions/{state['session_id']}/report", headers=admin["headers"]
     )
     data = report.json()["data"]
-    assert data["red_flag_count"] == 1
-    assert data["warning_count"] == 1
+    assert data["red_flag_count"] == 2  # camera_lost + tab_switch
+    assert data["warning_count"] == 0
     assert len(data["proctoring_timeline"]) == 2
 
     timeline = await client.get(
@@ -140,6 +140,35 @@ async def test_invalid_image_logs_capture_failed(client, admin):
     )
     kinds = [e["kind"] for e in timeline.json()["data"]["events"]]
     assert "capture_failed" in kinds  # FR-072: never silently dropped
+
+
+async def test_hardening_kinds_are_red_flags(client, admin):
+    """Devtools, screenshot attempts, app switches and window shrinking are all
+    red flags under the standard policy."""
+    _, headers, state = await _live_session(client, admin)
+    response = await client.post(
+        "/api/v1/exam/proctoring/events",
+        json={
+            "events": [
+                {"kind": "devtools_open", "detail": {"reason": "F12"}},
+                {"kind": "screen_capture_attempt", "detail": {"reason": "print_screen"}},
+                {"kind": "window_resized",
+                 "detail": {"baseline": {"width": 1920, "height": 1080},
+                            "current": {"width": 900, "height": 600}}},
+                {"kind": "window_blur"},
+            ]
+        },
+        headers=headers,
+    )
+    assert response.status_code == 200
+    flags = await client.get(
+        f"/api/v1/sessions/{state['session_id']}/proctoring/flags",
+        headers=admin["headers"],
+    )
+    red_kinds = {f["kind"] for f in flags.json()["data"]["red_flags"]}
+    assert red_kinds == {
+        "devtools_open", "screen_capture_attempt", "window_resized", "window_blur",
+    }
 
 
 async def test_candidate_cannot_read_timeline(client, admin):

@@ -28,6 +28,13 @@ class Settings(BaseSettings):
     judge0_auth_token: str = ""
     resend_api_key: str = ""
     email_from: str = "TestBuilder <no-reply@testbuilder.local>"
+    # SMTP takes priority over Resend when smtp_host is set (e.g. Gmail app password)
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_use_tls: bool = True  # STARTTLS on port 587
+    smtp_use_ssl: bool = False  # implicit TLS on port 465
 
     s3_endpoint: str = ""
     s3_bucket: str = "testbuilder"

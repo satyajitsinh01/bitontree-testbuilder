@@ -23,10 +23,12 @@ router = APIRouter(tags=["proctoring"])
 
 CLOCK_SKEW_TOLERANCE = timedelta(minutes=5)
 
-# severity policy per event kind under the "standard" policy (FR-076)
+# severity policy per event kind under the "standard" policy (FR-076).
+# Leaving the exam surface in any way (other apps, tab switches, devtools,
+# screenshots, shrinking the window) is a red flag by default.
 DEFAULT_SEVERITY = {
-    "tab_switch": "warning",
-    "window_blur": "info",
+    "tab_switch": "red_flag",
+    "window_blur": "red_flag",
     "fullscreen_exit": "warning",
     "copy_attempt": "warning",
     "paste_attempt": "warning",
@@ -35,6 +37,8 @@ DEFAULT_SEVERITY = {
     "capture_failed": "info",
     "devtools_open": "red_flag",
     "multi_display": "warning",
+    "screen_capture_attempt": "red_flag",
+    "window_resized": "red_flag",
 }
 
 

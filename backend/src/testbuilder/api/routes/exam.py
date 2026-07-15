@@ -46,8 +46,12 @@ async def exam_summary(
             "status": ctx.assignment.status,
             "rules": [
                 "Full-screen mode is required for the entire exam.",
-                "Camera and microphone must stay enabled; periodic screenshots are taken.",
-                "Tab switches, window blur and copy/paste attempts are recorded.",
+                "Camera and microphone must stay enabled; periodic snapshots are taken.",
+                "Switching to any other app, tab or window is recorded as a red flag.",
+                "Developer tools, right-click, copy/paste and screenshots are disabled; "
+                "any attempt is recorded as a red flag.",
+                "The browser window must stay at its starting size; shrinking it is "
+                "recorded as a red flag.",
                 "Each section is timed and auto-submits on expiry; the final section ends "
                 "with Submit and End Test.",
             ],
