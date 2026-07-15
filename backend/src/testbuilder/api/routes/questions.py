@@ -479,6 +479,8 @@ async def update_question(
     db: AsyncSession = Depends(get_db),
 ):
     question = await _get_question(db, ctx.org_id, question_id)
+    if body.qtype == "coding" and body.config.get("signature"):
+        body.config = harness.autofill_coding_config(body.config)
     errors = structural_errors(body.qtype, body.config)
     if errors:
         raise HTTPException(422, {"code": "invalid_structure", "details": errors})

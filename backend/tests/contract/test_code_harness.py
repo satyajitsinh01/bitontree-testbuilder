@@ -130,6 +130,44 @@ async def test_coding_question_created_with_generated_starter(client, admin):
     assert "twoSum" in version["config"]["starter_code"]["javascript"]
 
 
+async def test_edit_coding_question_regenerates_starter(client, admin):
+    """PUT (update) a coding question: changing the signature regenerates the
+    per-language boilerplate and creates a new version."""
+    q = await create_question(
+        client, admin["headers"], "coding", "Renamed problem", config=CODING_CONFIG,
+    )
+    new_config = dict(CODING_CONFIG)
+    new_config["signature"] = {
+        "function_name": "solve",
+        "params": [{"name": "arr", "type": "int[]"}],
+        "return_type": "int",
+    }
+    new_config["test_cases"] = [
+        {"id": "s1", "args": [[1, 2, 3]], "expected": 6, "is_hidden": False, "weight": 1},
+        {"id": "h1", "args": [[5]], "expected": 5, "is_hidden": True, "weight": 1},
+    ]
+    resp = await client.put(
+        f"/api/v1/questions/{q['id']}",
+        json={"qtype": "coding", "title": "Renamed problem", "answer_type": "code",
+              "config": new_config},
+        headers=admin["headers"],
+    )
+    assert resp.status_code == 200, resp.text
+    version = resp.json()["data"]["current_version"]
+    assert version["version"] == 2
+    assert "def solve(self, arr: List[int]) -> int" in version["config"]["starter_code"]["python"]
+
+
+async def test_delete_coding_question(client, admin):
+    q = await create_question(
+        client, admin["headers"], "coding", "Deletable problem", config=CODING_CONFIG,
+    )
+    resp = await client.delete(f"/api/v1/questions/{q['id']}", headers=admin["headers"])
+    assert resp.status_code == 200
+    gone = await client.get(f"/api/v1/questions/{q['id']}", headers=admin["headers"])
+    assert gone.status_code == 404
+
+
 async def test_exam_hides_hidden_cases_and_signature_visible(client, admin, two_sum_runner):
     headers, sq = await _start(client, admin)
     cfg = sq["config"]

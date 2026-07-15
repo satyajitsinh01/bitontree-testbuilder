@@ -28,6 +28,7 @@ import {
   ImportQuestionsDialog,
   NewQuestionDialog,
 } from "@/components/admin/QuestionDialogs";
+import { QuestionRowActions } from "@/components/admin/QuestionRowActions";
 import { FileJson, Sparkles } from "lucide-react";
 
 export default function QuestionBankPage() {
@@ -103,7 +104,7 @@ export default function QuestionBankPage() {
               <TableHead>Difficulty</TableHead>
               <TableHead>Source</TableHead>
               <TableHead>Status</TableHead>
-              <TableHead className="w-44" />
+              <TableHead className="w-56 text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -141,30 +142,33 @@ export default function QuestionBankPage() {
                     {q.status}
                   </Badge>
                 </TableCell>
-                <TableCell className="space-x-2">
-                  {q.status === "draft" && (
-                    <Button size="sm" onClick={() => approve.mutate(q.id)}>
-                      Approve
-                    </Button>
-                  )}
-                  {q.status === "active" && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => setStatus.mutate({ id: q.id, status: "inactive" })}
-                    >
-                      Deactivate
-                    </Button>
-                  )}
-                  {q.status === "inactive" && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => setStatus.mutate({ id: q.id, status: "active" })}
-                    >
-                      Activate
-                    </Button>
-                  )}
+                <TableCell>
+                  <div className="flex items-center justify-end gap-2">
+                    {q.status === "draft" && (
+                      <Button size="sm" onClick={() => approve.mutate(q.id)}>
+                        Approve
+                      </Button>
+                    )}
+                    {q.status === "active" && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setStatus.mutate({ id: q.id, status: "inactive" })}
+                      >
+                        Deactivate
+                      </Button>
+                    )}
+                    {q.status === "inactive" && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setStatus.mutate({ id: q.id, status: "active" })}
+                      >
+                        Activate
+                      </Button>
+                    )}
+                    <QuestionRowActions question={q} onDone={refresh} />
+                  </div>
                 </TableCell>
               </TableRow>
             ))}
