@@ -24,6 +24,8 @@ class Assessment(Base, TimestampMixin):
     org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
     title: Mapped[str] = mapped_column(String(300))
     description: Mapped[str] = mapped_column(Text, default="")
+    window_start_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    window_end_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="draft")  # draft|published|archived
     current_version_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     settings: Mapped[dict] = mapped_column(JSON, default=dict)

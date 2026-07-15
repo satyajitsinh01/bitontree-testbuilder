@@ -23,7 +23,7 @@ from ...services.sessions import (
     start_session,
     window_state,
 )
-from ..deps import CandidateContext, get_candidate
+from ..deps import CandidateContext, get_candidate, get_candidate_for_state
 
 router = APIRouter(prefix="/exam", tags=["exam"])
 
@@ -171,7 +171,7 @@ async def _session_questions_out(
 
 @router.get("/state")
 async def exam_state(
-    ctx: CandidateContext = Depends(get_candidate), db: AsyncSession = Depends(get_db)
+    ctx: CandidateContext = Depends(get_candidate_for_state), db: AsyncSession = Depends(get_db)
 ):
     from ...models import ExamSession
 

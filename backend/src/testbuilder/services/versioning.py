@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -137,8 +139,25 @@ async def validate_for_publish(
     )
     if not sections:
         return ["assessment needs at least one section"]
-    weight_total = sum(s.weightage_pct for s in sections)
-    if abs(weight_total - 100.0) > 0.01:
+    assessment = (
+        await db.execute(select(Assessment).where(Assessment.id == version.assessment_id))
+    ).scalar_one()
+    if assessment.window_start_at is None or assessment.window_end_at is None:
+        errors.append("assessment start and end time are required")
+    else:
+        window_minutes = int(
+            (assessment.window_end_at - assessment.window_start_at).total_seconds() // 60
+        )
+        section_minutes = sum(section.duration_min for section in sections)
+        if section_minutes != window_minutes:
+            errors.append(
+                "section durations must equal the assessment window "
+                f"({window_minutes} minutes; currently {section_minutes})"
+            )
+    weight_total = sum(
+        (Decimal(str(section.weightage_pct)) for section in sections), Decimal("0")
+    )
+    if weight_total != Decimal("100"):
         errors.append(f"section weightages must sum to 100 (currently {weight_total:g})")
     for section in sections:
         if section.duration_min <= 0:

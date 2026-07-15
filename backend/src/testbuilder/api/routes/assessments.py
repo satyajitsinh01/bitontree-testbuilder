@@ -1,3 +1,6 @@
+from datetime import datetime
+from decimal import Decimal
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
@@ -12,6 +15,7 @@ from ...models import (
     SectionPoolRule,
     SectionQuestion,
 )
+from ...models.base import now_utc
 from ...services.audit import write_audit
 from ...services.versioning import (
     get_current_version,
@@ -27,6 +31,8 @@ router = APIRouter(prefix="/assessments", tags=["assessments"])
 class AssessmentIn(BaseModel):
     title: str = Field(min_length=3, max_length=300)
     description: str = ""
+    window_start_at: datetime
+    window_end_at: datetime
     settings: dict = {}
 
 
@@ -34,7 +40,7 @@ class SectionIn(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     description: str = ""
     duration_min: int = Field(gt=0)
-    weightage_pct: float = Field(ge=0, le=100)
+    weightage_pct: float = Field(ge=0, le=100, multiple_of=0.01)
     allowed_qtypes: list[str] = []
     question_count: int = 0
     order_index: int | None = None
@@ -52,6 +58,71 @@ async def _get_assessment(db: AsyncSession, org_id: str, assessment_id: str) -> 
     if assessment is None:
         raise HTTPException(404, "not_found")
     return assessment
+
+
+async def _validate_section_weight_total(
+    db: AsyncSession,
+    version_id: str,
+    proposed_weight: float,
+    *,
+    exclude_section_id: str | None = None,
+) -> None:
+    query = select(Section.weightage_pct).where(
+        Section.assessment_version_id == version_id
+    )
+    if exclude_section_id is not None:
+        query = query.where(Section.id != exclude_section_id)
+    existing_weights = (await db.execute(query)).scalars().all()
+    total = sum((Decimal(str(weight)) for weight in existing_weights), Decimal("0"))
+    total += Decimal(str(proposed_weight))
+    if total > Decimal("100"):
+        raise HTTPException(
+            422,
+            {
+                "code": "section_weightage_exceeded",
+                "message": "Section weightages cannot exceed 100%.",
+                "details": [f"proposed total is {total}%"],
+            },
+        )
+
+
+def _naive(value: datetime) -> datetime:
+    return value.replace(tzinfo=None) if value.tzinfo else value
+
+
+def _assessment_duration_minutes(assessment: Assessment) -> int:
+    if assessment.window_start_at is None or assessment.window_end_at is None:
+        raise HTTPException(422, "assessment_window_required")
+    seconds = (assessment.window_end_at - assessment.window_start_at).total_seconds()
+    if seconds <= 0 or seconds % 60 != 0:
+        raise HTTPException(422, "assessment_window_must_use_whole_minutes")
+    if assessment.window_end_at <= now_utc():
+        raise HTTPException(422, "assessment_window_must_end_in_future")
+    return int(seconds // 60)
+
+
+async def _validate_section_duration_total(
+    db: AsyncSession,
+    assessment: Assessment,
+    version_id: str,
+    proposed_duration: int,
+    *,
+    exclude_section_id: str | None = None,
+) -> None:
+    query = select(Section.duration_min).where(Section.assessment_version_id == version_id)
+    if exclude_section_id is not None:
+        query = query.where(Section.id != exclude_section_id)
+    allocated = sum((await db.execute(query)).scalars().all()) + proposed_duration
+    available = _assessment_duration_minutes(assessment)
+    if allocated > available:
+        raise HTTPException(
+            422,
+            {
+                "code": "section_duration_exceeded",
+                "message": "Section durations cannot exceed the assessment window.",
+                "details": [f"allocated {allocated} minutes; available {available} minutes"],
+            },
+        )
 
 
 async def _sections_out(db: AsyncSession, version: AssessmentVersion) -> list[dict]:
@@ -120,6 +191,12 @@ async def _assessment_out(db: AsyncSession, assessment: Assessment) -> dict:
         "id": assessment.id,
         "title": assessment.title,
         "description": assessment.description,
+        "window_start_at": assessment.window_start_at.isoformat()
+        if assessment.window_start_at
+        else None,
+        "window_end_at": assessment.window_end_at.isoformat()
+        if assessment.window_end_at
+        else None,
         "status": assessment.status,
         "settings": assessment.settings,
         "version": None
@@ -174,9 +251,12 @@ async def create_assessment(
         org_id=ctx.org_id,
         title=body.title,
         description=body.description,
+        window_start_at=_naive(body.window_start_at),
+        window_end_at=_naive(body.window_end_at),
         settings=body.settings,
         created_by=ctx.user.id,
     )
+    _assessment_duration_minutes(assessment)
     db.add(assessment)
     await db.flush()
     await get_or_fork_draft(db, assessment)
@@ -252,6 +332,8 @@ async def add_section(
 ):
     assessment = await _get_assessment(db, ctx.org_id, assessment_id)
     version = await get_or_fork_draft(db, assessment)
+    await _validate_section_weight_total(db, version.id, body.weightage_pct)
+    await _validate_section_duration_total(db, assessment, version.id, body.duration_min)
     if body.order_index is None:
         max_order = (
             await db.execute(
@@ -371,6 +453,19 @@ async def patch_section(
                 "details": ["edit the assessment to fork a new draft version first"],
             },
         )
+    await _validate_section_weight_total(
+        db,
+        version.id,
+        body.weightage_pct,
+        exclude_section_id=section.id,
+    )
+    await _validate_section_duration_total(
+        db,
+        assessment,
+        version.id,
+        body.duration_min,
+        exclude_section_id=section.id,
+    )
     for field, value in body.model_dump(exclude_none=True).items():
         setattr(section, field, value)
     await db.commit()

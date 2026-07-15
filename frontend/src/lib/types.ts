@@ -62,6 +62,8 @@ export interface AssessmentOut {
   id: string;
   title: string;
   description: string;
+  window_start_at: string | null;
+  window_end_at: string | null;
   status: string;
   settings: Record<string, unknown>;
   version: {
@@ -76,7 +78,14 @@ export interface AssessmentOut {
 
 export interface AssignmentOut {
   id: string;
-  candidate: { id: string; full_name: string; email: string; phone: string };
+  candidate: {
+    id: string;
+    student_id: string | null;
+    full_name: string;
+    email: string;
+    phone: string;
+    cgpa: number | null;
+  };
   window_start_at: string;
   window_end_at: string;
   status: string;

@@ -1,16 +1,24 @@
 """FT-M3: window gating, one active session, admin recovery session."""
 
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
-from tests.conftest import add_candidate, build_published_assessment, candidate_login, now
+import time_machine
+from tests.conftest import (
+    add_candidate,
+    build_published_assessment,
+    candidate_login,
+    now,
+)
 
 
 async def test_login_before_window_shows_starts_soon(client, admin):
-    assessment = await build_published_assessment(client, admin, with_coding=False)
-    assignment = await add_candidate(
-        client, admin, assessment["id"],
-        start_delta=timedelta(hours=1), end_delta=timedelta(hours=3),
+    assessment = await build_published_assessment(
+        client,
+        admin,
+        with_coding=False,
+        window_start_delta=timedelta(hours=1),
     )
+    assignment = await add_candidate(client, admin, assessment["id"])
     response = await client.post(
         "/api/v1/auth/candidate/login",
         json={"username": assignment["username"],
@@ -25,15 +33,15 @@ async def test_login_before_window_shows_starts_soon(client, admin):
 
 async def test_login_after_window_expired(client, admin):
     assessment = await build_published_assessment(client, admin, with_coding=False)
-    assignment = await add_candidate(
-        client, admin, assessment["id"],
-        start_delta=timedelta(hours=-3), end_delta=timedelta(minutes=-1),
-    )
-    response = await client.post(
-        "/api/v1/auth/candidate/login",
-        json={"username": assignment["username"],
-              "password": assignment["initial_password"]},
-    )
+    assignment = await add_candidate(client, admin, assessment["id"])
+    with time_machine.travel(datetime.now(UTC) + timedelta(minutes=21), tick=False):
+        response = await client.post(
+            "/api/v1/auth/candidate/login",
+            json={
+                "username": assignment["username"],
+                "password": assignment["initial_password"],
+            },
+        )
     assert response.status_code == 403
     assert response.json()["error"]["message"] == "Assessment window has expired."
 

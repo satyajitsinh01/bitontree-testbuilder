@@ -3,7 +3,14 @@
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { api, ApiError, errorText, getToken, setToken } from "@/lib/api";
+import {
+  api,
+  ApiError,
+  errorText,
+  getToken,
+  setRefreshToken,
+  setToken,
+} from "@/lib/api";
 import type { ExamQuestion, ExamState } from "@/lib/types";
 import { useProctorGuard } from "@/hooks/useProctorGuard";
 import { DeviceCheck } from "@/components/exam/DeviceCheck";
@@ -122,22 +129,27 @@ export default function ExamPage() {
   }
 
   if (phase === "done") {
+    const timedOut = state?.status === "auto_submitted";
     return (
       <main className="min-h-screen flex items-center justify-center bg-muted/40 p-6">
         <Card className="max-w-md w-full text-center">
           <CardHeader>
             <CheckCircle2 className="h-12 w-12 text-foreground mx-auto" />
-            <CardTitle>Assessment submitted</CardTitle>
+            <CardTitle>
+              {timedOut ? "Time’s up — assessment submitted" : "Assessment submitted"}
+            </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <p className="text-sm text-muted-foreground">
-              Your answers have been recorded successfully. You may close this window —
-              the recruiting team will contact you with results.
+              {timedOut
+                ? "Your test time has expired. Your assessment was submitted automatically, and your saved answers have been recorded."
+                : "Your answers have been recorded successfully. You may close this window — the recruiting team will contact you with results."}
             </p>
             <Button
               variant="outline"
               onClick={() => {
                 setToken("candidate", null);
+                setRefreshToken("candidate", null);
                 router.push("/login");
               }}
             >
@@ -318,9 +330,9 @@ function ExamShell({
         </div>
         {activeSection?.deadline_at && (
           <SectionTimer
-            deadlineAt={activeSection.deadline_at}
-            serverNow={state.server_now}
-            onExpire={() => refreshState()}
+            sessionId={state.session_id}
+            sectionId={activeSection.section_id}
+            onStateChange={refreshState}
           />
         )}
       </header>

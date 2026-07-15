@@ -32,6 +32,12 @@ export function setToken(kind: TokenKind, token: string | null) {
   else window.localStorage.setItem(`tb_${kind}_token`, token);
 }
 
+export function setRefreshToken(kind: TokenKind, token: string | null) {
+  if (typeof window === "undefined") return;
+  if (token === null) window.localStorage.removeItem(`tb_${kind}_refresh_token`);
+  else window.localStorage.setItem(`tb_${kind}_refresh_token`, token);
+}
+
 interface RequestOptions {
   method?: string;
   body?: unknown;
@@ -45,7 +51,41 @@ interface ErrorPayload {
   details?: unknown;
 }
 
-export async function api<T>(path: string, options: RequestOptions = {}): Promise<T> {
+let candidateRefresh: Promise<boolean> | null = null;
+
+async function refreshCandidateToken(): Promise<boolean> {
+  if (typeof window === "undefined") return false;
+  const refreshToken = window.localStorage.getItem("tb_candidate_refresh_token");
+  if (!refreshToken) return false;
+  if (!candidateRefresh) {
+    candidateRefresh = (async () => {
+      const response = await fetch(`${API_BASE}/api/v1/auth/candidate/refresh`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refresh_token: refreshToken }),
+      });
+      if (!response.ok) return false;
+      const payload = (await response.json()) as {
+        data?: { access_token?: string; refresh_token?: string };
+      };
+      if (!payload.data?.access_token || !payload.data.refresh_token) return false;
+      setToken("candidate", payload.data.access_token);
+      setRefreshToken("candidate", payload.data.refresh_token);
+      return true;
+    })()
+      .catch(() => false)
+      .finally(() => {
+        candidateRefresh = null;
+      });
+  }
+  return candidateRefresh;
+}
+
+export async function api<T>(
+  path: string,
+  options: RequestOptions = {},
+  hasRetried = false
+): Promise<T> {
   const headers: Record<string, string> = {};
   if (options.token) {
     const token = getToken(options.token);
@@ -57,6 +97,15 @@ export async function api<T>(path: string, options: RequestOptions = {}): Promis
     headers,
     body: options.formData ?? (options.body !== undefined ? JSON.stringify(options.body) : undefined),
   });
+  if (
+    response.status === 401 &&
+    options.token === "candidate" &&
+    !hasRetried &&
+    !path.startsWith("/auth/candidate/refresh") &&
+    (await refreshCandidateToken())
+  ) {
+    return api<T>(path, options, true);
+  }
   const contentType = response.headers.get("content-type") ?? "";
   if (!contentType.includes("application/json")) {
     if (!response.ok) throw new ApiError(response.status, "http_error");

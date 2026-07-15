@@ -21,9 +21,15 @@ import { Rocket } from "lucide-react";
 
 function AddSectionDialog({
   assessmentId,
+  allocatedWeight,
+  allocatedDuration,
+  availableDuration,
   onChanged,
 }: {
   assessmentId: string;
+  allocatedWeight: number;
+  allocatedDuration: number;
+  availableDuration: number;
   onChanged: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -31,6 +37,8 @@ function AddSectionDialog({
   const [duration, setDuration] = useState(15);
   const [weightage, setWeightage] = useState(50);
   const [isFinal, setIsFinal] = useState(false);
+  const remainingWeight = Math.max(0, 100 - allocatedWeight);
+  const remainingDuration = Math.max(0, availableDuration - allocatedDuration);
 
   const add = useMutation({
     mutationFn: () =>
@@ -75,6 +83,7 @@ function AddSectionDialog({
               <Input
                 type="number"
                 min={1}
+                max={remainingDuration}
                 value={duration}
                 onChange={(e) => setDuration(Number(e.target.value))}
               />
@@ -84,10 +93,17 @@ function AddSectionDialog({
               <Input
                 type="number"
                 min={0}
-                max={100}
+                max={remainingWeight}
+                step={0.01}
                 value={weightage}
                 onChange={(e) => setWeightage(Number(e.target.value))}
               />
+              <p className="text-xs text-muted-foreground">
+                {allocatedDuration} min allocated · {remainingDuration} min remaining
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {allocatedWeight}% allocated · {remainingWeight}% remaining
+              </p>
             </div>
           </div>
           <label className="flex items-center gap-2 text-sm">
@@ -101,7 +117,14 @@ function AddSectionDialog({
           <Button
             className="w-full"
             onClick={() => add.mutate()}
-            disabled={!name.trim() || add.isPending}
+            disabled={
+              !name.trim() ||
+              weightage < 0 ||
+              weightage > remainingWeight ||
+              duration < 1 ||
+              duration > remainingDuration ||
+              add.isPending
+            }
           >
             Add section
           </Button>
@@ -244,6 +267,17 @@ export function BuilderTab({
 
   const sections = assessment.version?.sections ?? [];
   const totalWeight = sections.reduce((sum, s) => sum + s.weightage_pct, 0);
+  const totalDuration = sections.reduce((sum, s) => sum + s.duration_min, 0);
+  const availableDuration =
+    assessment.window_start_at && assessment.window_end_at
+      ? Math.round(
+          (new Date(`${assessment.window_end_at}Z`).getTime() -
+            new Date(`${assessment.window_start_at}Z`).getTime()) /
+            60000
+        )
+      : 0;
+  const weightageComplete = Math.round(totalWeight * 100) / 100 === 100;
+  const durationComplete = totalDuration === availableDuration;
   const frozen = assessment.version?.frozen ?? false;
 
   return (
@@ -261,13 +295,36 @@ export function BuilderTab({
           {sections.reduce((sum, s) => sum + s.duration_min, 0)} min
         </p>
         <div className="flex gap-2">
-          <AddSectionDialog assessmentId={assessment.id} onChanged={onChanged} />
-          <Button onClick={() => publish.mutate()} disabled={publish.isPending} className="gap-2">
+          <AddSectionDialog
+            assessmentId={assessment.id}
+            allocatedWeight={totalWeight}
+            allocatedDuration={totalDuration}
+            availableDuration={availableDuration}
+            onChanged={onChanged}
+          />
+          <Button
+            onClick={() => publish.mutate()}
+            disabled={publish.isPending || !weightageComplete || !durationComplete}
+            className="gap-2"
+            title={weightageComplete ? undefined : "Section weightages must total exactly 100%"}
+          >
             <Rocket className="h-4 w-4" />
             {assessment.status === "published" ? "Republish" : "Publish"}
           </Button>
         </div>
       </div>
+      {!weightageComplete && (
+        <p className="text-sm text-destructive">
+          Publishing is available only when section weightages total exactly 100%
+          (currently {totalWeight}%).
+        </p>
+      )}
+      {!durationComplete && (
+        <p className="text-sm text-destructive">
+          Section durations must total exactly {availableDuration} minutes for the fixed
+          assessment window (currently {totalDuration} minutes).
+        </p>
+      )}
       <div className="grid gap-4">
         {sections.map((section) => (
           <Card key={section.id}>

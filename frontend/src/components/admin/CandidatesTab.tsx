@@ -24,14 +24,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Mail, Plus, RotateCcw, Trash2, Upload } from "lucide-react";
-
-function toLocalInputValue(offsetMinutes: number): string {
-  const date = new Date(Date.now() + offsetMinutes * 60000);
-  date.setSeconds(0, 0);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
+import { Mail, Pencil, Plus, RotateCcw, Trash2, Upload } from "lucide-react";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 // Indian mobile: exactly 10 digits starting 6-9, optional +91 prefix
@@ -45,8 +38,6 @@ type CandidateForm = {
   fullName: string;
   email: string;
   phone: string;
-  startAt: string;
-  endAt: string;
 };
 
 function validateCandidate(form: CandidateForm): Partial<Record<keyof CandidateForm, string>> {
@@ -56,14 +47,6 @@ function validateCandidate(form: CandidateForm): Partial<Record<keyof CandidateF
   else if (!EMAIL_RE.test(form.email.trim())) errors.email = "Enter a valid email address.";
   if (form.phone.trim() && !INDIAN_MOBILE_RE.test(normalizePhone(form.phone)))
     errors.phone = "Enter a valid 10-digit Indian mobile number (starts with 6-9, +91 optional).";
-  if (!form.startAt) errors.startAt = "Start time is required.";
-  if (!form.endAt) errors.endAt = "End time is required.";
-  if (form.startAt && form.endAt) {
-    const start = new Date(form.startAt).getTime();
-    const end = new Date(form.endAt).getTime();
-    if (end <= start) errors.endAt = "End must be after the start time.";
-    else if (end <= Date.now()) errors.endAt = "End time is already in the past.";
-  }
   return errors;
 }
 
@@ -84,8 +67,6 @@ function AddCandidateDialog({
     fullName: "",
     email: "",
     phone: "",
-    startAt: toLocalInputValue(0),
-    endAt: toLocalInputValue(240),
   });
   const [touched, setTouched] = useState<Partial<Record<keyof CandidateForm, boolean>>>({});
   const [sendEmail, setSendEmail] = useState(true);
@@ -112,8 +93,6 @@ function AddCandidateDialog({
           full_name: form.fullName.trim(),
           email: form.email.trim(),
           phone: normalizePhone(form.phone),
-          window_start_at: new Date(form.startAt).toISOString(),
-          window_end_at: new Date(form.endAt).toISOString(),
           send_email: sendEmail,
         },
       }),
@@ -126,7 +105,7 @@ function AddCandidateDialog({
   });
 
   function submit() {
-    setTouched({ fullName: true, email: true, phone: true, startAt: true, endAt: true });
+    setTouched({ fullName: true, email: true, phone: true });
     if (isValid) add.mutate();
   }
 
@@ -137,8 +116,6 @@ function AddCandidateDialog({
       fullName: "",
       email: "",
       phone: "",
-      startAt: toLocalInputValue(0),
-      endAt: toLocalInputValue(240),
     });
   }
 
@@ -206,18 +183,6 @@ function AddCandidateDialog({
               />
               {touched.phone && <FieldError message={errors.phone} />}
             </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <Label htmlFor="cand-start">Window start</Label>
-                <Input id="cand-start" type="datetime-local" {...field("startAt")} />
-                {touched.startAt && <FieldError message={errors.startAt} />}
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="cand-end">Window end</Label>
-                <Input id="cand-end" type="datetime-local" {...field("endAt")} />
-                {touched.endAt && <FieldError message={errors.endAt} />}
-              </div>
-            </div>
             <label className="flex items-center gap-2 text-sm">
               <input
                 type="checkbox"
@@ -248,6 +213,8 @@ function ImportButton({
   onDone: () => void;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
+  const [open, setOpen] = useState(false);
+  const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
 
   async function upload(file: File) {
@@ -272,6 +239,8 @@ function ImportButton({
           (data.failed_rows ? ` — ${data.failed_rows} failed (see batch report)` : "")
       );
       onDone();
+      setOpen(false);
+      setFile(null);
     } catch (error) {
       toast.error(errorText(error));
     } finally {
@@ -288,8 +257,11 @@ function ImportButton({
         accept=".csv,.xlsx"
         className="hidden"
         onChange={(e) => {
-          const file = e.target.files?.[0];
-          if (file) upload(file);
+          const selected = e.target.files?.[0];
+          if (selected) {
+            setFile(selected);
+            setOpen(true);
+          }
         }}
       />
       <Button
@@ -300,6 +272,29 @@ function ImportButton({
       >
         <Upload className="h-4 w-4" /> {busy ? "Importing…" : "Import CSV/Excel"}
       </Button>
+      <Dialog
+        open={open}
+        onOpenChange={(nextOpen) => {
+          setOpen(nextOpen);
+          if (!nextOpen && !busy) setFile(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Import candidate details</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            CSV columns: studentId, name, email, phone, cgpa
+          </p>
+          <p className="rounded border bg-muted/40 px-3 py-2 text-sm">{file?.name}</p>
+          <Button
+            onClick={() => file && upload(file)}
+            disabled={!file || busy}
+          >
+            {busy ? "Importing…" : "Upload candidates"}
+          </Button>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
@@ -311,6 +306,63 @@ const STATUS_COLORS: Record<string, "default" | "secondary" | "destructive" | "o
   not_started: "outline",
   expired: "destructive",
 };
+
+function EditCandidateDialog({ row, onDone }: { row: AssignmentOut; onDone: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState(row.candidate.full_name);
+  const [email, setEmail] = useState(row.candidate.email);
+  const [phone, setPhone] = useState(row.candidate.phone);
+  const [studentId, setStudentId] = useState(row.candidate.student_id ?? "");
+  const [cgpa, setCgpa] = useState(row.candidate.cgpa?.toString() ?? "");
+  const save = useMutation({
+    mutationFn: () =>
+      api(`/assignments/${row.id}`, {
+        token: "admin",
+        method: "PATCH",
+        body: {
+          full_name: name.trim(),
+          email: email.trim(),
+          phone: normalizePhone(phone),
+          student_id: studentId.trim(),
+          cgpa: cgpa === "" ? null : Number(cgpa),
+        },
+      }),
+    onSuccess: () => {
+      toast.success("Candidate updated");
+      setOpen(false);
+      onDone();
+    },
+    onError: (error) => toast.error(errorText(error)),
+  });
+  const valid =
+    name.trim().length >= 2 &&
+    EMAIL_RE.test(email.trim()) &&
+    (!phone || INDIAN_MOBILE_RE.test(normalizePhone(phone))) &&
+    (cgpa === "" || (Number(cgpa) >= 0 && Number(cgpa) <= 10));
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger
+        render={<Button size="icon" variant="ghost" title="Edit candidate" />}
+      >
+        <Pencil className="h-4 w-4" />
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader><DialogTitle>Edit candidate</DialogTitle></DialogHeader>
+        <div className="grid grid-cols-2 gap-4">
+          <Input value={studentId} onChange={(e) => setStudentId(e.target.value)} placeholder="Student ID" />
+          <Input type="number" min={0} max={10} step={0.01} value={cgpa} onChange={(e) => setCgpa(e.target.value)} placeholder="CGPA" />
+          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name" />
+          <Input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" />
+          <Input className="col-span-2" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Phone" />
+        </div>
+        <Button disabled={!valid || save.isPending} onClick={() => save.mutate()}>
+          {save.isPending ? "Saving…" : "Save changes"}
+        </Button>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 export function CandidatesTab({
   assessmentId,
@@ -377,7 +429,9 @@ export function CandidatesTab({
         <Table>
           <TableHeader>
             <TableRow>
+              <TableHead>Student ID</TableHead>
               <TableHead>Candidate</TableHead>
+              <TableHead>CGPA</TableHead>
               <TableHead>Username</TableHead>
               <TableHead>Window</TableHead>
               <TableHead>Status</TableHead>
@@ -387,10 +441,14 @@ export function CandidatesTab({
           <TableBody>
             {data?.items.map((row) => (
               <TableRow key={row.id}>
+                <TableCell className="font-mono text-xs">
+                  {row.candidate.student_id ?? "—"}
+                </TableCell>
                 <TableCell>
                   <p className="font-medium">{row.candidate.full_name}</p>
                   <p className="text-xs text-muted-foreground">{row.candidate.email}</p>
                 </TableCell>
+                <TableCell>{row.candidate.cgpa ?? "—"}</TableCell>
                 <TableCell className="font-mono text-xs">{row.username}</TableCell>
                 <TableCell className="text-xs text-muted-foreground">
                   {new Date(row.window_start_at + "Z").toLocaleString()} →{" "}
@@ -403,6 +461,7 @@ export function CandidatesTab({
                 </TableCell>
                 <TableCell>
                   <div className="flex gap-1">
+                    <EditCandidateDialog row={row} onDone={refresh} />
                     <Button
                       size="icon"
                       variant="ghost"
@@ -433,7 +492,7 @@ export function CandidatesTab({
             ))}
             {data && data.items.length === 0 && (
               <TableRow>
-                <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
+                <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
                   No candidates yet — add one or import a CSV.
                 </TableCell>
               </TableRow>
