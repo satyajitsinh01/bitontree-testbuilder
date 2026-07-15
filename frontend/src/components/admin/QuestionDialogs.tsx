@@ -513,21 +513,24 @@ export function AiGenerateDialog({ onDone }: { onDone: () => void }) {
   );
 }
 
+interface ImportResult {
+  imported: number;
+  failed: number;
+  errors: { index: number; title?: string; error: string }[];
+}
+
 export function ImportQuestionsDialog({ onDone }: { onDone: () => void }) {
-  const [open, setOpen] = useState(false);
+  // The file input lives OUTSIDE any dialog: opening the OS file picker blurs the
+  // window, which would close a Base UI dialog and unmount an input rendered
+  // inside it before onChange fires. Results are shown in a dialog afterwards.
   const fileRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState<{
-    imported: number;
-    failed: number;
-    errors: { index: number; title?: string; error: string }[];
-  } | null>(null);
+  const [result, setResult] = useState<ImportResult | null>(null);
+  const [resultOpen, setResultOpen] = useState(false);
 
   async function downloadTemplate() {
     try {
-      const template = await api<unknown>("/questions/import-template", {
-        token: "admin",
-      });
+      const template = await api<unknown>("/questions/import-template", { token: "admin" });
       const blob = new Blob([JSON.stringify(template, null, 2)], {
         type: "application/json",
       });
@@ -544,7 +547,6 @@ export function ImportQuestionsDialog({ onDone }: { onDone: () => void }) {
 
   async function upload(file: File) {
     setBusy(true);
-    setResult(null);
     try {
       const form = new FormData();
       form.append("file", file);
@@ -561,11 +563,14 @@ export function ImportQuestionsDialog({ onDone }: { onDone: () => void }) {
           Array.isArray(details) ? details.join("; ") : payload.error?.code ?? "import failed"
         );
       }
-      setResult(payload.data);
+      setResult(payload.data as ImportResult);
+      setResultOpen(true);
       if (payload.data.imported > 0) {
         toast.success(
-          `${payload.data.imported} questions imported as drafts — review and approve them.`
+          `${payload.data.imported} question(s) imported as drafts — review and approve them.`
         );
+      } else {
+        toast.error("No questions imported — check the file format.");
       }
       onDone();
     } catch (error) {
@@ -577,57 +582,47 @@ export function ImportQuestionsDialog({ onDone }: { onDone: () => void }) {
   }
 
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(next) => {
-        setOpen(next);
-        if (!next) setResult(null);
-      }}
-    >
-      <DialogTrigger render={<Button variant="outline" className="gap-2" />}>
-        <FileJson className="h-4 w-4" /> Import JSON
-      </DialogTrigger>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Import questions from JSON</DialogTitle>
-        </DialogHeader>
-        <div className="space-y-4">
-          <p className="text-sm text-muted-foreground">
-            Upload a <code className="font-mono">.json</code> file shaped as{" "}
-            <code className="font-mono">{"{ \"questions\": [...] }"}</code> with{" "}
-            <code className="font-mono">qtype</code>,{" "}
-            <code className="font-mono">title</code>,{" "}
-            <code className="font-mono">difficulty</code>, options / test cases in{" "}
-            <code className="font-mono">config</code>, etc. Everything imports as
-            drafts for review. Download the template for the exact format of all
-            three question types.
-          </p>
-          <div className="flex gap-2">
-            <Button variant="outline" onClick={downloadTemplate}>
-              Download template
-            </Button>
-            <input
-              ref={fileRef}
-              type="file"
-              accept=".json,application/json"
-              className="hidden"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) upload(file);
-              }}
-            />
-            <Button disabled={busy} onClick={() => fileRef.current?.click()}>
-              {busy ? "Importing…" : "Choose file & import"}
-            </Button>
-          </div>
+    <>
+      <input
+        ref={fileRef}
+        type="file"
+        accept=".json,application/json"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) upload(file);
+        }}
+      />
+      <Button variant="ghost" size="sm" onClick={downloadTemplate}>
+        Template
+      </Button>
+      <Button
+        variant="outline"
+        className="gap-2"
+        disabled={busy}
+        onClick={() => fileRef.current?.click()}
+      >
+        <FileJson className="h-4 w-4" /> {busy ? "Importing…" : "Import JSON"}
+      </Button>
+
+      <Dialog open={resultOpen} onOpenChange={setResultOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Import results</DialogTitle>
+          </DialogHeader>
           {result && (
-            <div className="space-y-2 rounded-lg border bg-muted/40 p-3 text-sm">
+            <div className="space-y-2 text-sm">
               <p>
-                Imported <strong>{result.imported}</strong> · Failed{" "}
+                Imported <strong>{result.imported}</strong> as drafts · Failed{" "}
                 <strong>{result.failed}</strong>
               </p>
+              {result.imported > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  Filter by “Drafts” and approve them to make them usable.
+                </p>
+              )}
               {result.errors.length > 0 && (
-                <ul className="space-y-1 text-xs text-destructive max-h-40 overflow-y-auto">
+                <ul className="space-y-1 rounded-lg border border-destructive/30 bg-destructive/5 p-2 text-xs text-destructive max-h-56 overflow-y-auto">
                   {result.errors.map((e) => (
                     <li key={e.index}>
                       #{e.index + 1} {e.title ? `(${e.title}) ` : ""}— {e.error}
@@ -635,10 +630,13 @@ export function ImportQuestionsDialog({ onDone }: { onDone: () => void }) {
                   ))}
                 </ul>
               )}
+              <Button className="w-full" onClick={() => setResultOpen(false)}>
+                Done
+              </Button>
             </div>
           )}
-        </div>
-      </DialogContent>
-    </Dialog>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
